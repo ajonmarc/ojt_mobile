@@ -1,10 +1,10 @@
-// app/admin/components/Sidebar.tsx
-import { View, TouchableOpacity, Image, Text, StyleSheet, Pressable } from "react-native";
+import { View, TouchableOpacity, Image, Text, StyleSheet, Pressable, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import { StackNavigationProp } from "@react-navigation/stack";
-import { studentRoutes, logoutRoute, RouteConfig } from "../app/student/navigationConfig";
+import { studentRoutes, logoutRoute, RouteConfig } from "../src/config/student/_navigationConfig";
 import { RootStackParamList } from "@/types";
+import { useAuth } from "@/context/AuthContext"; // ✅ Import useAuth
 
 type NavigationProp = StackNavigationProp<RootStackParamList>;
 
@@ -16,20 +16,39 @@ type SidebarProps = {
 
 export default function Sidebar({ isOpen, onClose, activeRoute }: SidebarProps) {
   const navigation = useNavigation<NavigationProp>();
+  const { logout } = useAuth(); // ✅ Access logout function from context
 
-  const renderMenuItem = ({ name, label, icon }: RouteConfig) => (
-    <TouchableOpacity
-      key={name}
-      style={[styles.menuItem, activeRoute === name && styles.activeMenuItem]}
-      onPress={() => {
-        onClose();
-        navigation.navigate(name);
-      }}
-    >
-      <Ionicons name={icon} size={24} color="#fff" />
-      <Text style={styles.menuText}>{label}</Text>
-    </TouchableOpacity>
-  );
+  const handleLogout = async () => {
+    try {
+      await logout();
+      onClose();
+      navigation.reset({
+        index: 0,
+        routes: [{ name: "(auth)/index" }],
+      }); // clears the nav stack
+    } catch (error) {
+      Alert.alert("Error", "Logout failed. Please try again.");
+    }
+  };
+  
+
+  const renderMenuItem = ({ name, label, icon }: RouteConfig) => {
+    const isLogout = name === logoutRoute.name;
+
+    return (
+      <TouchableOpacity
+        key={name}
+        style={[styles.menuItem, activeRoute === name && !isLogout && styles.activeMenuItem]}
+        onPress={isLogout ? handleLogout : () => {
+          onClose();
+          navigation.navigate(name);
+        }}
+      >
+        <Ionicons name={icon} size={24} color="#fff" />
+        <Text style={styles.menuText}>{label}</Text>
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <>
@@ -38,7 +57,7 @@ export default function Sidebar({ isOpen, onClose, activeRoute }: SidebarProps) 
         <View style={styles.sidebar}>
           <View style={styles.logo}>
             <Image
-              source={require("../assets/logo.png")}
+              source={require("../assets/snsu-logo.png")}
               style={styles.logoImage}
             />
             <Text style={styles.logoText}>OJTMS</Text>

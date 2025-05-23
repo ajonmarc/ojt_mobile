@@ -14,6 +14,8 @@ const semesters = [
   "2nd Semester, A.Y. 2023",
   "1st Semester, A.Y. 2024",
   "2nd Semester, A.Y. 2024",
+  "1st Semester, A.Y. 2025",
+  "2nd Semester, A.Y. 2025",
 ];
 
 export default function SemesterPickerModal({

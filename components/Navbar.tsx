@@ -3,7 +3,7 @@ import { View, TouchableOpacity, Text, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import { StackNavigationProp } from "@react-navigation/stack";
-import  { navbarRoutes, RouteConfig } from "../app/admin/navigationConfig";
+import  { navbarRoutes, RouteConfig } from "../src/config/admin/_navigationConfig";
 
 
 import { RootStackParamList } from "../types"; // Adjust path

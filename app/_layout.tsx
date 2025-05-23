@@ -1,10 +1,31 @@
-import { Stack } from "expo-router";
+import { Stack, Slot } from "expo-router";
 import { StatusBar } from "react-native";
-import { AuthProvider } from "../context/AuthContext";
+import { AuthProvider, useAuth } from "../context/AuthContext";
+import { useEffect } from "react";
+import { useRouter } from "expo-router";
 
-export default function RootLayout() {
+function RootLayoutNav() {
+  const { user, isLoading } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (isLoading) return; // Wait for auth data to load
+    console.log("Auth state:", { user, isLoading }); // Debug log
+    if (user) {
+      // Redirect to home based on role
+      if (user.role === "admin") {
+        router.replace("/admin/home");
+      } else if (user.role === "student") {
+        router.replace("/student/home");
+      }
+    } else {
+      // Show login screen
+      router.replace("/"); 
+    }
+  }, [user, isLoading]);
+
   return (
-    <AuthProvider>
+    <>
       <StatusBar
         backgroundColor="#FFC107"
         barStyle="dark-content"
@@ -29,6 +50,14 @@ export default function RootLayout() {
         <Stack.Screen name="student/progress" options={{ headerShown: false }} />
         <Stack.Screen name="student/profile" options={{ headerShown: false }} />
       </Stack>
+    </>
+  );
+}
+
+export default function RootLayout() {
+  return (
+    <AuthProvider>
+      <RootLayoutNav />
     </AuthProvider>
   );
 }

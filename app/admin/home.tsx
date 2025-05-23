@@ -2,15 +2,33 @@
 import { View, ScrollView, Text, TouchableOpacity, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useState } from "react";
+import { Link } from "expo-router";
 import Sidebar from "@/components/Sidebar";
 import Navbar from "@/components/Navbar";
 import Header from "@/components/Header";
-
 
 export default function AdminHome() {
   const [expandStats, setExpandStats] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [semester, setSemester] = useState("1st Semester, A.Y. 2023");
+
+  // Mock data
+  const stats = {
+    totalStudents: 1,
+    totalPrograms: 13,
+    activeStudents: 1,
+    pendingApplications: 0
+  };
+
+  const recentStudents = [
+    { id: 1, name: "Julrose E. Iibaste", program: "BSCS", status: "Active" }
+  ];
+
+  const programStats = [
+    { id: 1, programName: "BSCS", totalStudents: 1, activeStudents: 1 },
+    { id: 2, programName: "BSIT", totalStudents: 0, activeStudents: 0 },
+    { id: 3, programName: "BSCE", totalStudents: 0, activeStudents: 0 }
+  ];
 
   const toggleSidebar = () => {
     setSidebarOpen(!sidebarOpen);
@@ -19,6 +37,18 @@ export default function AdminHome() {
   const handleChangeSemester = (newSemester: string) => {
     setSemester(newSemester);
     // Optional: Add logic to update data based on new semester
+  };
+
+  const calculateProgramProgress = (programName: string) => {
+    const program = programStats.find(p => p.programName === programName);
+    if (!program || program.totalStudents === 0) return 0;
+    return (program.activeStudents / program.totalStudents) * 100;
+  };
+
+  const getProgressColorClass = (progress: number) => {
+    if (progress < 30) return "redProgress";
+    if (progress < 70) return "yellowProgress";
+    return "greenProgress";
   };
 
   return (
@@ -38,53 +68,115 @@ export default function AdminHome() {
         <View style={styles.statsGrid}>
           <View style={styles.statsCard}>
             <Ionicons name="people" size={32} color="#388E3C" />
-            <Text style={styles.statsNumber}>1</Text>
+            <Text style={styles.statsNumber}>{stats.totalStudents}</Text>
             <Text style={styles.statsLabel}>Total Students</Text>
+            <Link href="/admin/students" asChild>
+              <TouchableOpacity style={styles.viewButton}>
+                <Text style={styles.viewButtonText}>View All</Text>
+              </TouchableOpacity>
+            </Link>
           </View>
           <View style={styles.statsCard}>
             <Ionicons name="document-text" size={32} color="#388E3C" />
-            <Text style={styles.statsNumber}>13</Text>
+            <Text style={styles.statsNumber}>{stats.totalPrograms}</Text>
             <Text style={styles.statsLabel}>OJT Programs</Text>
+            <Link href="/admin/programs" asChild>
+              <TouchableOpacity style={styles.viewButton}>
+                <Text style={styles.viewButtonText}>View All</Text>
+              </TouchableOpacity>
+            </Link>
           </View>
           <View style={styles.statsCard}>
             <Ionicons name="checkmark-circle" size={32} color="#388E3C" />
-            <Text style={styles.statsNumber}>1</Text>
+            <Text style={styles.statsNumber}>{stats.activeStudents}</Text>
             <Text style={styles.statsLabel}>Active Students</Text>
+            <Link href="/admin/students" asChild>
+              <TouchableOpacity style={styles.viewButton}>
+                <Text style={styles.viewButtonText}>View All</Text>
+              </TouchableOpacity>
+            </Link>
           </View>
           <View style={styles.statsCard}>
             <Ionicons name="hourglass" size={32} color="#388E3C" />
-            <Text style={styles.statsNumber}>0</Text>
+            <Text style={styles.statsNumber}>{stats.pendingApplications}</Text>
             <Text style={styles.statsLabel}>Pending Applications</Text>
+            <Link href="/admin/applications" asChild>
+              <TouchableOpacity style={styles.viewButton}>
+                <Text style={styles.viewButtonText}>View All</Text>
+              </TouchableOpacity>
+            </Link>
           </View>
         </View>
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Recent Students</Text>
-          <View style={styles.studentList}>
-            <View style={styles.studentItem}>
-              <Text style={styles.studentName}>Julrose E. Iibaste</Text>
-              <Text style={styles.studentProgram}>BSCS</Text>
-              <View style={styles.statusBadge}>
-                <Text style={styles.statusText}>Active</Text>
+
+        <View style={styles.dashboardGrid}>
+          {/* Recent Students Section */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Recent Students</Text>
+            <View style={styles.tableContainer}>
+              <View style={styles.tableHeader}>
+                <Text style={[styles.tableHeaderCell, { flex: 2 }]}>Name</Text>
+                <Text style={[styles.tableHeaderCell, { flex: 1 }]}>Program</Text>
+                <Text style={[styles.tableHeaderCell, { flex: 1 }]}>Status</Text>
               </View>
+              {recentStudents.map((student) => (
+                <View key={student.id} style={styles.tableRow}>
+                  <Text style={[styles.tableCell, { flex: 2 }]}>{student.name}</Text>
+                  <Text style={[styles.tableCell, { flex: 1 }]}>{student.program}</Text>
+                  <View style={[styles.statusBadge, { backgroundColor: student.status === "Active" ? "#4CAF50" : "#FFA000" }]}>
+                    <Text style={styles.statusText}>{student.status}</Text>
+                  </View>
+                </View>
+              ))}
             </View>
           </View>
+
+          {/* Program Statistics Dropdown */}
+          <TouchableOpacity
+            style={styles.expandableSection}
+            onPress={() => setExpandStats(!expandStats)}
+          >
+            <Text style={styles.sectionTitle}>Program Statistics</Text>
+            <Ionicons
+              name={expandStats ? "chevron-up" : "chevron-down"}
+              size={24}
+              color="#333"
+            />
+          </TouchableOpacity>
+          
+          {expandStats && (
+            <View style={styles.statsExpanded}>
+              {programStats.map((program) => (
+                <View key={program.id} style={styles.programStatCard}>
+                  <View style={styles.programInfo}>
+                    <Text style={styles.programName}>{program.programName}</Text>
+                    <View style={styles.programNumbers}>
+                      <View style={styles.statItem}>
+                        <Text style={styles.statLabel}>Total Students:</Text>
+                        <Text style={styles.statValue}>{program.totalStudents}</Text>
+                      </View>
+                      <View style={styles.statItem}>
+                        <Text style={styles.statLabel}>Active:</Text>
+                        <Text style={styles.statValue}>{program.activeStudents}</Text>
+                      </View>
+                    </View>
+                  </View>
+                  <View style={styles.progressBarContainer}>
+                    <View 
+                      style={[
+                        styles.progressBar, 
+                        { 
+                          width: `${calculateProgramProgress(program.programName)}%`,
+                          backgroundColor: calculateProgramProgress(program.programName) < 30 ? '#F44336' :
+                                          calculateProgramProgress(program.programName) < 70 ? '#FFA000' : '#4CAF50'
+                        }
+                      ]} 
+                    />
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
         </View>
-        <TouchableOpacity
-          style={styles.expandableSection}
-          onPress={() => setExpandStats(!expandStats)}
-        >
-          <Text style={styles.sectionTitle}>Program Statistics</Text>
-          <Ionicons
-            name={expandStats ? "chevron-up" : "chevron-down"}
-            size={24}
-            color="#333"
-          />
-        </TouchableOpacity>
-        {expandStats && (
-          <View style={styles.statsExpanded}>
-            <Text>Program statistics details will appear here</Text>
-          </View>
-        )}
       </ScrollView>
       <Navbar activeRoute="admin/home" />
     </View>
@@ -133,6 +225,22 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#666",
     textAlign: "center",
+    marginBottom: 8,
+  },
+  viewButton: {
+    backgroundColor: "#388E3C",
+    borderRadius: 4,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    marginTop: 10,
+  },
+  viewButtonText: {
+    color: "white",
+    fontSize: 12,
+    fontWeight: "500",
+  },
+  dashboardGrid: {
+    flexDirection: "column",
   },
   section: {
     backgroundColor: "white",
@@ -150,31 +258,37 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginBottom: 12,
   },
-  studentList: {
+  tableContainer: {
     marginTop: 8,
   },
-  studentItem: {
+  tableHeader: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: "#eee",
+    borderBottomColor: "#e0e0e0",
+    paddingBottom: 8,
   },
-  studentName: {
+  tableHeaderCell: {
+    fontWeight: "bold",
     fontSize: 14,
-    flex: 2,
+    color: "#333",
   },
-  studentProgram: {
+  tableRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f0f0f0",
+  },
+  tableCell: {
     fontSize: 14,
-    color: "#666",
-    flex: 1,
+    color: "#333",
   },
   statusBadge: {
-    backgroundColor: "#4CAF50",
     borderRadius: 12,
     paddingVertical: 4,
     paddingHorizontal: 8,
+    flex: 1,
+    alignItems: "center",
   },
   statusText: {
     color: "white",
@@ -206,5 +320,54 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 3,
     elevation: 2,
+  },
+  programStatCard: {
+    marginBottom: 16,
+  },
+  programInfo: {
+    marginBottom: 8,
+  },
+  programName: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#333",
+    marginBottom: 4,
+  },
+  programNumbers: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  statItem: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  statLabel: {
+    fontSize: 14,
+    color: "#666",
+    marginRight: 4,
+  },
+  statValue: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#333",
+  },
+  progressBarContainer: {
+    height: 6,
+    backgroundColor: "#e0e0e0",
+    borderRadius: 3,
+    overflow: "hidden",
+    marginTop: 8,
+  },
+  progressBar: {
+    height: "100%",
+  },
+  redProgress: {
+    backgroundColor: "#F44336",
+  },
+  yellowProgress: {
+    backgroundColor: "#FFA000",
+  },
+  greenProgress: {
+    backgroundColor: "#4CAF50",
   },
 });

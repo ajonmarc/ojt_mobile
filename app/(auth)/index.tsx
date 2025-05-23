@@ -7,7 +7,7 @@ import { useAuth } from "../../context/AuthContext";
 
 type RootStackParamList = {
   "(auth)/index": undefined;
-  "admin/home": undefined; 
+  "admin/home": undefined;
   "student/home": undefined;
 };
 
@@ -17,24 +17,34 @@ export default function Index() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [passwordVisible, setPasswordVisible] = useState(false);
-  const { login } = useAuth();
+  const { login, user } = useAuth();
   const navigation = useNavigation<NavigationProp>();
 
-  const handleLogin = () => {
-    if (login(email, password)) {
-      if (email === "admin") {
-        navigation.navigate("admin/home"); // Navigate to tabs
-      } else if (email === "student") {
+  const handleLogin = async () => {
+    if (!email || !password) {
+      Alert.alert("Error", "Please fill in both email and password fields.");
+      return;
+    }
+
+    const result = await login(email, password);
+    if (result.success) {
+      // Assuming `user` is available from context or state
+      if (user.role === "admin") {
+        navigation.navigate("admin/home");
+      } else if (user.role === "student") {
         navigation.navigate("student/home");
       }
+    } else if (result.errors) {
+      const errorMessages = Object.values(result.errors).flat().join("\n");
+      Alert.alert("Error", errorMessages || "Please fill in all required fields.");
     } else {
-      Alert.alert("Error", "Invalid email or password");
+      Alert.alert("Error", result.error || "Invalid email or password.");
     }
   };
 
   return (
     <View style={styles.container}>
-      <Image source={require("../../assets/logo.png")} style={styles.logo} />
+      <Image source={require("../../assets/snsu-logo.png")} style={styles.logo} />
       <Text style={styles.welcomeText}>Login</Text>
       <Text style={styles.subText}>Welcome back!</Text>
       <TextInput
