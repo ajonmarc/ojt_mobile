@@ -30,10 +30,10 @@ export default function Header({ onToggleSidebar, title, onChangeSemester }: Hea
           <Ionicons name="menu" size={24} color="#333" />
         </TouchableOpacity>
         <View style={styles.spacer} />
-        <TouchableOpacity style={styles.semesterButton} onPress={handleSemesterPress}>
+        {/* <TouchableOpacity style={styles.semesterButton} onPress={handleSemesterPress}>
           <Text style={styles.headerText}>{title}</Text>
           <Ionicons name="calendar" size={24} color="#333" style={styles.calendarIcon} />
-        </TouchableOpacity>
+        </TouchableOpacity> */}
       </View>
       <SemesterPickerModal
         visible={modalVisible}

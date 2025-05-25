@@ -1,34 +1,50 @@
-import { View, ScrollView, Text, TouchableOpacity, StyleSheet } from "react-native";
+import { View, ScrollView, Text, TouchableOpacity, StyleSheet, ActivityIndicator, RefreshControl } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useState, useEffect } from "react";
 import { useNavigation } from "@react-navigation/native";
 import Sidebar from "@/components/studentSidebar";
 import Navbar from "@/components/studentNavbar";
 import Header from "@/components/Header";
+import api from "../../axios";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // Define types
 interface PartnerInfo {
-  name: string;
-  address: string;
-  phone: string;
-  email: string;
+  partnerName: string;
+  partnerAddress: string;
+  partnerPhone: string;
+  partnerEmail: string;
 }
 
 interface Evaluation {
   id: string;
   date: string;
-  score: number;
+  supervisor: string;
+  score: number; // Changed to score to match frontend usage
   feedback: string;
 }
 
 interface Application {
   status: "Pending" | "Approved" | "Rejected" | null;
   remarks?: string;
-  partnerInfo?: PartnerInfo;
-  startDate?: string;
-  endDate?: string;
-  requiredHours?: number;
-  completedHours?: number;
+  partner?: PartnerInfo;
+  start_date?: string;
+  end_date?: string;
+  required_hours?: number;
+  completed_hours?: number;
+}
+
+interface Student {
+  name: string;
+  studentId: string;
+  ojtProgram: string;
+}
+
+interface DashboardData {
+  student: Student;
+  application: Application;
+  partner: PartnerInfo | null;
+  evaluations: Evaluation[];
 }
 
 // Toast component for notifications
@@ -48,45 +64,81 @@ export default function StudentHome() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [semester, setSemester] = useState("1st Semester, A.Y. 2023");
   const [toast, setToast] = useState({ message: "", visible: false });
+  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
+  const [loading, setLoading] = useState(true);
   const navigation = useNavigation<any>();
+  const [refreshing, setRefreshing] = useState(false);
 
-  // Mock student data (replace with API/auth context)
-  const student = {
-    name: "Surname, Given Name I.",
-    studentId: "2020-00123",
-  };
+  // Add this before the useEffect (around line 70, after state declarations)
+const fetchDashboardData = async (isRefresh = false) => {
+  try {
+    if (isRefresh) setRefreshing(true);
+    else setLoading(true);
+    const token = await AsyncStorage.getItem("auth_token");
+    if (!token) {
+      setToast({ message: "Authentication error. Please log in.", visible: true });
+      navigation.navigate("Login");
+      return;
+    }
 
-  // Mock application data (replace with API)
-  const [application, setApplication] = useState<Application>({
-    status: "Approved",
-    partnerInfo: {
-      name: "xAI",
-      address: "Surigao City",
-      phone: "09123456789",
-      email: "contact@xai.com",
-    },
-    startDate: "2025-01-15",
-    endDate: "2025-06-15",
-    requiredHours: 200,
-    completedHours: 150,
-    remarks: "Need to improve documentation skills.",
-  });
+    const response = await api.post("/dashboard", {}, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
 
-  // Mock evaluations data (replace with API)
-  const evaluations: Evaluation[] = [
-    {
-      id: "1",
-      date: "2025-03-01",
-      score: 85,
-      feedback: "Great work on the project, but improve time management.",
-    },
-    {
-      id: "2",
-      date: "2025-02-15",
-      score: 90,
-      feedback: "Excellent performance, keep it up!",
-    },
-  ];
+    setDashboardData(response.data);
+    setToast({ message: "Dashboard data loaded successfully", visible: true });
+  } catch (error: any) {
+    console.error("Error fetching dashboard data:", error);
+    const errorMessage = error.response?.data?.error || "Failed to load dashboard data";
+    setToast({ message: errorMessage, visible: true });
+    if (error.response?.status === 401) {
+      navigation.navigate("Login");
+    }
+  } finally {
+    if (isRefresh) setRefreshing(false);
+    else setLoading(false);
+  }
+};
+
+// Update the useEffect (around line 80) to call the function
+useEffect(() => {
+  fetchDashboardData();
+}, []);
+
+  // Fetch dashboard data
+  useEffect(() => {
+ const fetchDashboardData = async (isRefresh = false) => {
+  try {
+    if (isRefresh) setRefreshing(true);
+    else setLoading(true);
+    const token = await AsyncStorage.getItem("auth_token");
+    if (!token) {
+      setToast({ message: "Authentication error. Please log in.", visible: true });
+      navigation.navigate("Login");
+      return;
+    }
+
+    const response = await api.post("/dashboard", {}, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    setDashboardData(response.data);
+    setToast({ message: "Dashboard data loaded successfully", visible: true });
+  } catch (error: any) {
+    console.error("Error fetching dashboard data:", error);
+    const errorMessage = error.response?.data?.error || "Failed to load dashboard data";
+    setToast({ message: errorMessage, visible: true });
+    if (error.response?.status === 401) {
+      navigation.navigate("Login");
+    }
+  } finally {
+    if (isRefresh) setRefreshing(false);
+    else setLoading(false);
+  }
+};
+
+    fetchDashboardData();
+  }, []);
 
   // Auto-dismiss toast after 3 seconds
   useEffect(() => {
@@ -106,12 +158,26 @@ export default function StudentHome() {
 
   const navigateTo = (route: string) => {
     navigation.navigate(route);
-    setToast({ message: `Navigating to ${route.replace("Student", "")}...`, visible: true });
+    setToast({ message: `Navigating to ${route.replace("student/", "")}...`, visible: true });
   };
 
   const calculateProgress = () => {
-    if (!application.requiredHours || !application.completedHours) return 0;
-    return Math.round((application.completedHours / application.requiredHours) * 100);
+    if (!dashboardData?.application?.required_hours || !dashboardData?.application?.completed_hours) return 0;
+    return Math.round((dashboardData.application.completed_hours / dashboardData.application.required_hours) * 100);
+  };
+
+  const formatDate = (dateString?: string) => {
+    if (!dateString) return "Not set";
+    try {
+      return new Date(dateString).toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      });
+    } catch (error) {
+      console.error("Invalid date format:", error);
+      return "Invalid date";
+    }
   };
 
   const getStatusClass = (status: Application["status"]) => {
@@ -127,39 +193,59 @@ export default function StudentHome() {
     }
   };
 
+  if (loading) {
+    return (
+      <View style={styles.loading}>
+        <ActivityIndicator size="large" color="#4CAF50" />
+      </View>
+    );
+  }
+
+  if (!dashboardData) {
+    return (
+      <View style={styles.container}>
+        <Text>Error loading data</Text>
+      </View>
+    );
+  }
+
+  const { student, application, partner, evaluations } = dashboardData;
+
   return (
     <View style={styles.container}>
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} activeRoute="student/home" />
       <Header onToggleSidebar={toggleSidebar} title={semester} onChangeSemester={handleChangeSemester} />
-      <ScrollView style={styles.content}>
+      <ScrollView
+  style={styles.content}
+  refreshControl={
+    <RefreshControl
+      refreshing={refreshing}
+      onRefresh={() => fetchDashboardData(true)}
+      colors={["#4CAF50"]} // Matches your app's theme
+      tintColor="#4CAF50"
+    />
+  }
+>
         {/* Welcome Section */}
         <View style={styles.welcomeSection}>
           <Text style={styles.welcomeTitle}>Welcome, {student.name}!</Text>
           <Text style={styles.studentId}>Student ID: {student.studentId}</Text>
+           <Text style={styles.studentId}>Program: {student.ojtProgram}</Text>
         </View>
 
         {/* Quick Actions */}
         <View style={styles.quickActionsCard}>
           <Text style={styles.sectionTitle}>Quick Actions</Text>
           <View style={styles.actionsGrid}>
-            <TouchableOpacity
-              style={styles.actionItem}
-              onPress={() => navigateTo("student/application")}
-            >
+            <TouchableOpacity style={styles.actionItem} onPress={() => navigateTo("student/application")}>
               <Ionicons name="document-text" size={24} color="#4CAF50" />
               <Text style={styles.actionText}>OJT Application</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.actionItem}
-              onPress={() => navigateTo("student/progress")}
-            >
+            <TouchableOpacity style={styles.actionItem} onPress={() => navigateTo("student/progress")}>
               <Ionicons name="stats-chart" size={24} color="#4CAF50" />
               <Text style={styles.actionText}>View Progress</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.actionItem}
-              onPress={() => navigateTo("student/profile")}
-            >
+            <TouchableOpacity style={styles.actionItem} onPress={() => navigateTo("student/profile")}>
               <Ionicons name="person" size={24} color="#4CAF50" />
               <Text style={styles.actionText}>My Profile</Text>
             </TouchableOpacity>
@@ -169,7 +255,7 @@ export default function StudentHome() {
         {/* OJT Status Overview */}
         <View style={styles.statusCard}>
           <Text style={styles.sectionTitle}>OJT Status Overview</Text>
-          {application.status ? (
+          {application?.status ? (
             <View style={styles.statusContent}>
               {/* Status Header */}
               <View style={styles.statusHeader}>
@@ -177,10 +263,7 @@ export default function StudentHome() {
                   {application.status}
                 </Text>
                 {application.status === "Rejected" && (
-                  <TouchableOpacity
-                    style={styles.reapplyButton}
-                    onPress={() => navigateTo("StudentApplication")}
-                  >
+                  <TouchableOpacity style={styles.reapplyButton} onPress={() => navigateTo("student/application")}>
                     <Text style={styles.reapplyButtonText}>Reapply</Text>
                   </TouchableOpacity>
                 )}
@@ -190,25 +273,25 @@ export default function StudentHome() {
               {application.status === "Approved" && (
                 <View>
                   {/* Company Information */}
-                  {application.partnerInfo && (
+                  {partner && (
                     <View style={styles.partnerInfo}>
                       <Text style={styles.subSectionTitle}>Company Information</Text>
                       <View style={styles.infoGrid}>
                         <View style={styles.infoItem}>
                           <Text style={styles.label}>Company Name:</Text>
-                          <Text style={styles.value}>{application.partnerInfo.name}</Text>
+                          <Text style={styles.value}>{partner.partnerName}</Text>
                         </View>
                         <View style={styles.infoItem}>
                           <Text style={styles.label}>Address:</Text>
-                          <Text style={styles.value}>{application.partnerInfo.address}</Text>
+                          <Text style={styles.value}>{partner.partnerAddress}</Text>
                         </View>
                         <View style={styles.infoItem}>
                           <Text style={styles.label}>Contact:</Text>
-                          <Text style={styles.value}>{application.partnerInfo.phone}</Text>
+                          <Text style={styles.value}>{partner.partnerPhone}</Text>
                         </View>
                         <View style={styles.infoItem}>
                           <Text style={styles.label}>Email:</Text>
-                          <Text style={styles.value}>{application.partnerInfo.email}</Text>
+                          <Text style={styles.value}>{partner.partnerEmail}</Text>
                         </View>
                       </View>
                     </View>
@@ -221,15 +304,15 @@ export default function StudentHome() {
                       <View style={styles.timeDetails}>
                         <View style={styles.detailItem}>
                           <Text style={styles.label}>Start Date:</Text>
-                          <Text style={styles.value}>{application.startDate}</Text>
+                          <Text style={styles.value}>{formatDate(application.start_date)}</Text>
                         </View>
                         <View style={styles.detailItem}>
                           <Text style={styles.label}>End Date:</Text>
-                          <Text style={styles.value}>{application.endDate}</Text>
+                          <Text style={styles.value}>{formatDate(application.end_date)}</Text>
                         </View>
                         <View style={styles.detailItem}>
                           <Text style={styles.label}>Required Hours:</Text>
-                          <Text style={styles.value}>{application.requiredHours} hours</Text>
+                          <Text style={styles.value}>{application.required_hours} hours</Text>
                         </View>
                       </View>
                       <View style={styles.progressSection}>
@@ -238,12 +321,10 @@ export default function StudentHome() {
                           <Text style={styles.progressPercentage}>{calculateProgress()}%</Text>
                         </View>
                         <View style={styles.progressBar}>
-                          <View
-                            style={[styles.progressFill, { width: `${calculateProgress()}%` }]}
-                          />
+                          <View style={[styles.progressFill, { width: `${calculateProgress()}%` }]} />
                         </View>
                         <Text style={styles.hoursCounter}>
-                          {application.completedHours} / {application.requiredHours} hours completed
+                          {application.completed_hours} / {application.required_hours} hours completed
                         </Text>
                       </View>
                     </View>
@@ -281,10 +362,7 @@ export default function StudentHome() {
           ) : (
             <View style={styles.noApplication}>
               <Text style={styles.messageText}>You haven't submitted an OJT application yet.</Text>
-              <TouchableOpacity
-                style={styles.applyButton}
-                onPress={() => navigateTo("StudentApplication")}
-              >
+              <TouchableOpacity style={styles.applyButton} onPress={() => navigateTo("student/application")}>
                 <Text style={styles.applyButtonText}>Apply Now</Text>
               </TouchableOpacity>
             </View>
@@ -299,10 +377,11 @@ export default function StudentHome() {
               {evaluations.map((evaluation) => (
                 <View key={evaluation.id} style={styles.evaluationItem}>
                   <View style={styles.evaluationHeader}>
-                    <Text style={styles.evalDate}>{evaluation.date}</Text>
+                    <Text style={styles.evalDate}>{formatDate(evaluation.date)}</Text>
                     <Text style={styles.evalScore}>Score: {evaluation.score}/100</Text>
                   </View>
                   <Text style={styles.evalFeedback}>{evaluation.feedback}</Text>
+                  <Text style={styles.evalSupervisor}>Supervisor: {evaluation.supervisor}</Text>
                 </View>
               ))}
             </View>
@@ -322,7 +401,9 @@ export default function StudentHome() {
   );
 }
 
+// Styles remain unchanged
 const styles = StyleSheet.create({
+    loading: { flex: 1, justifyContent: "center", alignItems: "center" },
   container: {
     flex: 1,
     backgroundColor: "#E8F5E9",
@@ -354,7 +435,7 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 2,
   },
-  sectionTitle: {
+    sectionTitle: {
     fontSize: 18,
     fontWeight: "600",
     marginBottom: 12,
@@ -571,6 +652,11 @@ const styles = StyleSheet.create({
   evalFeedback: {
     fontSize: 14,
     color: "#333",
+    marginBottom: 4,
+  },
+  evalSupervisor: {
+    fontSize: 14,
+    color: "#666",
   },
   toastContainer: {
     position: "absolute",

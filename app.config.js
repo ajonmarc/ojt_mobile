@@ -9,7 +9,7 @@ export default {
     scheme: "yourapp",
     plugins: ["expo-router"],
     extra: {
-      apiUrl: process.env.API_URL || "http://192.168.1.40:8000", // Fallback URL
+      apiUrl: process.env.API_URL || "http://192.168.72.150:8000", // Fallback URL
     },
   },
 };

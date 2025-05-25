@@ -4,10 +4,9 @@
   "version": "1.0.0",
   "scripts": {
     "start": "node -r dotenv/config node_modules/expo/cli start",
-  "android": "node -r dotenv/config node_modules/expo/cli start --android",
-  "ios": "node -r dotenv/config node_modules/expo/cli start --ios",
+    "android": "node -r dotenv/config node_modules/expo/cli start --android",
+    "ios": "node -r dotenv/config node_modules/expo/cli start --ios",
     "reset-project": "node ./scripts/reset-project.js",
-
     "web": "expo start --web",
     "test": "jest --watchAll",
     "lint": "expo lint"
@@ -18,6 +17,7 @@
   "dependencies": {
     "@expo/vector-icons": "^14.1.0",
     "@react-native-async-storage/async-storage": "1.23.1",
+    "@react-native-community/datetimepicker": "8.2.0",
     "@react-navigation/bottom-tabs": "^7.3.10",
     "@react-navigation/drawer": "^7.3.9",
     "@react-navigation/native": "^7.1.6",
@@ -27,6 +27,7 @@
     "expo": "~52.0.43",
     "expo-blur": "~14.0.3",
     "expo-constants": "~17.0.8",
+    "expo-document-picker": "~13.0.3",
     "expo-font": "~13.0.4",
     "expo-haptics": "~14.0.1",
     "expo-linking": "~7.0.5",
@@ -36,11 +37,14 @@
     "expo-symbols": "~0.2.2",
     "expo-system-ui": "~4.0.9",
     "expo-web-browser": "~14.0.2",
+    "moment": "^2.30.1",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "react-native": "0.76.9",
     "react-native-chart-kit": "^6.12.0",
+    "react-native-date-picker": "^5.0.12",
     "react-native-document-picker": "^9.3.1",
+    "react-native-file-viewer": "^2.1.5",
     "react-native-gesture-handler": "~2.20.2",
     "react-native-permissions": "^5.3.0",
     "react-native-reanimated": "~3.16.1",
