@@ -1,34 +1,71 @@
 // app/admin/home.tsx
 import { View, ScrollView, Text, TouchableOpacity, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "expo-router";
 import Sidebar from "@/components/Sidebar";
 import Navbar from "@/components/Navbar";
 import Header from "@/components/Header";
+import api from "../../axios"; // Import the API module
+
+// Define TypeScript interfaces for the data
+interface Stats {
+  totalStudents: number;
+  totalPrograms: number;
+  activeStudents: number;
+  pendingApplications: number;
+}
+
+interface RecentStudent {
+  id: number;
+  name: string;
+  program: string;
+  status: string;
+}
+
+interface ProgramStat {
+  id: number;
+  programName: string;
+  totalStudents: number;
+  activeStudents: number;
+}
 
 export default function AdminHome() {
   const [expandStats, setExpandStats] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [semester, setSemester] = useState("1st Semester, A.Y. 2023");
+  const [stats, setStats] = useState<Stats>({
+    totalStudents: 0,
+    totalPrograms: 0,
+    activeStudents: 0,
+    pendingApplications: 0,
+  });
+  const [recentStudents, setRecentStudents] = useState<RecentStudent[]>([]);
+  const [programStats, setProgramStats] = useState<ProgramStat[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Mock data
-  const stats = {
-    totalStudents: 1,
-    totalPrograms: 13,
-    activeStudents: 1,
-    pendingApplications: 0
-  };
+  // Fetch data from the backend
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        const response = await api.get("/admin/home");
+        const { stats, recentStudents, programStats } = response.data;
+        setStats(stats);
+        setRecentStudents(recentStudents);
+        setProgramStats(programStats);
+        setError(null);
+      } catch (err) {
+        setError("Failed to fetch data. Please try again.");
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  const recentStudents = [
-    { id: 1, name: "Julrose E. Iibaste", program: "BSCS", status: "Active" }
-  ];
-
-  const programStats = [
-    { id: 1, programName: "BSCS", totalStudents: 1, activeStudents: 1 },
-    { id: 2, programName: "BSIT", totalStudents: 0, activeStudents: 0 },
-    { id: 3, programName: "BSCE", totalStudents: 0, activeStudents: 0 }
-  ];
+    fetchData();
+  }, []);
 
   const toggleSidebar = () => {
     setSidebarOpen(!sidebarOpen);
@@ -36,12 +73,11 @@ export default function AdminHome() {
 
   const handleChangeSemester = (newSemester: string) => {
     setSemester(newSemester);
-    // Optional: Add logic to update data based on new semester
+    // Optional: Refetch data with semester parameter if your backend supports it
   };
 
-  const calculateProgramProgress = (programName: string) => {
-    const program = programStats.find(p => p.programName === programName);
-    if (!program || program.totalStudents === 0) return 0;
+  const calculateProgramProgress = (program: ProgramStat) => {
+    if (program.totalStudents === 0) return 0;
     return (program.activeStudents / program.totalStudents) * 100;
   };
 
@@ -50,6 +86,22 @@ export default function AdminHome() {
     if (progress < 70) return "yellowProgress";
     return "greenProgress";
   };
+
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <Text>Loading...</Text>
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.errorText}>{error}</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -122,7 +174,12 @@ export default function AdminHome() {
                 <View key={student.id} style={styles.tableRow}>
                   <Text style={[styles.tableCell, { flex: 2 }]}>{student.name}</Text>
                   <Text style={[styles.tableCell, { flex: 1 }]}>{student.program}</Text>
-                  <View style={[styles.statusBadge, { backgroundColor: student.status === "Active" ? "#4CAF50" : "#FFA000" }]}>
+                  <View
+                    style={[
+                      styles.statusBadge,
+                      { backgroundColor: student.status === "Active" ? "#4CAF50" : "#FFA000" },
+                    ]}
+                  >
                     <Text style={styles.statusText}>{student.status}</Text>
                   </View>
                 </View>
@@ -142,7 +199,7 @@ export default function AdminHome() {
               color="#333"
             />
           </TouchableOpacity>
-          
+
           {expandStats && (
             <View style={styles.statsExpanded}>
               {programStats.map((program) => (
@@ -161,15 +218,19 @@ export default function AdminHome() {
                     </View>
                   </View>
                   <View style={styles.progressBarContainer}>
-                    <View 
+                    <View
                       style={[
-                        styles.progressBar, 
-                        { 
-                          width: `${calculateProgramProgress(program.programName)}%`,
-                          backgroundColor: calculateProgramProgress(program.programName) < 30 ? '#F44336' :
-                                          calculateProgramProgress(program.programName) < 70 ? '#FFA000' : '#4CAF50'
-                        }
-                      ]} 
+                        styles.progressBar,
+                        {
+                          width: `${calculateProgramProgress(program)}%`,
+                          backgroundColor:
+                            calculateProgramProgress(program) < 30
+                              ? "#F44336"
+                              : calculateProgramProgress(program) < 70
+                              ? "#FFA000"
+                              : "#4CAF50",
+                        },
+                      ]}
                     />
                   </View>
                 </View>
@@ -369,5 +430,11 @@ const styles = StyleSheet.create({
   },
   greenProgress: {
     backgroundColor: "#4CAF50",
+  },
+  errorText: {
+    fontSize: 16,
+    color: "#F44336",
+    textAlign: "center",
+    marginTop: 20,
   },
 });

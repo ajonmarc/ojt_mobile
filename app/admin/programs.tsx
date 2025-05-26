@@ -1,20 +1,24 @@
-import { View, ScrollView, Text, TouchableOpacity, StyleSheet, TextInput, Modal, Alert, ActivityIndicator } from "react-native";
+// app/admin/programs.tsx
+import { View, ScrollView, Text, TouchableOpacity, StyleSheet, TextInput, Modal, ActivityIndicator } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useState, useEffect } from "react";
 import Sidebar from "@/components/Sidebar";
 import Navbar from "@/components/Navbar";
 import Header from "@/components/Header";
+import api from "../../axios"; // Import the API module
 
 // Define types
 interface Program {
   id: string;
-  programId: string;
   programName: string;
   description: string;
 }
 
+interface Stats {
+  totalPrograms: number;
+}
+
 interface FormErrors {
-  programId?: string;
   programName?: string;
   description?: string;
 }
@@ -40,24 +44,37 @@ export default function AdminPrograms() {
   const [selectedProgramId, setSelectedProgramId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [toast, setToast] = useState({ message: "", visible: false });
-
-  // Sample data
-  const [programs, setPrograms] = useState<Program[]>([
-    {
-      id: "1",
-      programId: "PROG-001",
-      programName: "Computer Science",
-      description: "A program focused on software development and algorithms.",
-    },
-  ]);
-
+  const [programs, setPrograms] = useState<Program[]>([]);
+  const [stats, setStats] = useState<Stats>({ totalPrograms: 0 });
   const [form, setForm] = useState({
-    programId: "",
     programName: "",
     description: "",
     errors: {} as FormErrors,
     processing: false,
   });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch data from the backend
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        const response = await api.get("/admin/programs");
+        const { programs, stats } = response.data;
+        setPrograms(programs);
+        setStats(stats);
+        setError(null);
+      } catch (err: any) {
+        setError("Failed to fetch programs. Please try again.");
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, []);
 
   // Auto-dismiss toast after 3 seconds
   useEffect(() => {
@@ -73,12 +90,12 @@ export default function AdminPrograms() {
 
   const handleChangeSemester = (newSemester: string) => {
     setSemester(newSemester);
+    // Optional: Refetch data with semester parameter if supported
   };
 
   const openAddModal = () => {
     setIsAddProgram(true);
     setForm({
-      programId: "",
       programName: "",
       description: "",
       errors: {},
@@ -91,7 +108,6 @@ export default function AdminPrograms() {
     setIsAddProgram(false);
     setSelectedProgramId(program.id);
     setForm({
-      programId: program.programId,
       programName: program.programName,
       description: program.description,
       errors: {},
@@ -103,22 +119,17 @@ export default function AdminPrograms() {
   const closeModal = () => {
     setDialogVisible(false);
     setForm({
-      programId: "",
       programName: "",
       description: "",
       errors: {},
       processing: false,
     });
+    setSelectedProgramId(null);
   };
 
   const validateForm = (): boolean => {
     const errors: FormErrors = {};
     let isValid = true;
-
-    if (!form.programId.trim()) {
-      errors.programId = "Program ID is required";
-      isValid = false;
-    }
 
     if (!form.programName.trim()) {
       errors.programName = "Program Name is required";
@@ -134,7 +145,7 @@ export default function AdminPrograms() {
     return isValid;
   };
 
-  const submit = () => {
+  const submit = async () => {
     if (!validateForm()) {
       setToast({ message: "Please fix the errors in the form.", visible: true });
       return;
@@ -142,35 +153,41 @@ export default function AdminPrograms() {
 
     setForm((prev) => ({ ...prev, processing: true }));
 
-    setTimeout(() => {
+    try {
       if (isAddProgram) {
-        const newProgram: Program = {
-          id: Date.now().toString(),
-          programId: form.programId,
+        // Add new program
+        const response = await api.post("/admin/programs", {
           programName: form.programName,
           description: form.description,
-        };
-        setPrograms((prev) => [...prev, newProgram]);
-        setToast({ message: `Program ${form.programName} added successfully!`, visible: true });
+        });
+        setPrograms((prev) => [...prev, response.data.program]);
+        setStats((prev) => ({ ...prev, totalPrograms: prev.totalPrograms + 1 }));
+        setToast({ message: response.data.message, visible: true });
       } else if (selectedProgramId) {
+        // Update existing program
+        const response = await api.put(`/admin/programs/${selectedProgramId}`, {
+          programName: form.programName,
+          description: form.description,
+        });
         setPrograms((prev) =>
           prev.map((program) =>
-            program.id === selectedProgramId
-              ? {
-                  ...program,
-                  programId: form.programId,
-                  programName: form.programName,
-                  description: form.description,
-                }
-              : program
+            program.id === selectedProgramId ? response.data.program : program
           )
         );
-        setToast({ message: `Program ${form.programName} updated successfully!`, visible: true });
+        setToast({ message: response.data.message, visible: true });
       }
-
-      setForm((prev) => ({ ...prev, processing: false }));
       closeModal();
-    }, 1000);
+    } catch (err: any) {
+      if (err.response?.status === 422) {
+        setForm((prev) => ({ ...prev, errors: err.response.data.errors }));
+        setToast({ message: "Please fix the errors in the form.", visible: true });
+      } else {
+        setToast({ message: "An error occurred. Please try again.", visible: true });
+        console.error(err);
+      }
+    } finally {
+      setForm((prev) => ({ ...prev, processing: false }));
+    }
   };
 
   const handleDelete = (id: string, programName: string) => {
@@ -182,9 +199,19 @@ export default function AdminPrograms() {
         {
           text: "Delete",
           style: "destructive",
-          onPress: () => {
-            setPrograms((prev) => prev.filter((program) => program.id !== id));
-            setToast({ message: `Program ${programName} deleted successfully!`, visible: true });
+          onPress: async () => {
+            try {
+              const response = await api.delete(`/admin/programs/${id}`);
+              setPrograms((prev) => prev.filter((program) => program.id !== id));
+              setStats((prev) => ({ ...prev, totalPrograms: prev.totalPrograms - 1 }));
+              setToast({ message: response.data.message, visible: true });
+            } catch (err: any) {
+              setToast({
+                message: err.response?.data?.message || "Failed to delete program. Please try again.",
+                visible: true,
+              });
+              console.error(err);
+            }
           },
         },
       ],
@@ -195,7 +222,6 @@ export default function AdminPrograms() {
   // Filter programs based on search query
   const filteredPrograms = programs.filter(
     (program) =>
-      program.programId.toLowerCase().includes(searchQuery.toLowerCase()) ||
       program.programName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       program.description.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -208,11 +234,26 @@ export default function AdminPrograms() {
 
   // Column widths for consistent table layout
   const columnWidths = {
-    programId: 120,
     programName: 180,
     description: 250,
     actions: 120,
   };
+
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <ActivityIndicator size="large" color="#4CAF50" />
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.errorText}>{error}</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -249,7 +290,6 @@ export default function AdminPrograms() {
             <View>
               {/* Table Header */}
               <View style={styles.tableHeader}>
-                <Text style={[styles.headerCell, { width: columnWidths.programId }]}>Program ID</Text>
                 <Text style={[styles.headerCell, { width: columnWidths.programName }]}>Program Name</Text>
                 <Text style={[styles.headerCell, { width: columnWidths.description }]}>Description</Text>
                 <Text style={[styles.headerCell, { width: columnWidths.actions }]}>Action</Text>
@@ -264,9 +304,6 @@ export default function AdminPrograms() {
                 ) : (
                   filteredPrograms.map((program) => (
                     <View key={program.id} style={styles.tableRow}>
-                      <Text style={[styles.tableCell, { width: columnWidths.programId }]} numberOfLines={1}>
-                        {program.programId}
-                      </Text>
                       <Text style={[styles.tableCell, { width: columnWidths.programName }]} numberOfLines={1}>
                         {program.programName}
                       </Text>
@@ -303,81 +340,70 @@ export default function AdminPrograms() {
             <View style={styles.statIconContainer}>
               <Ionicons name="book" size={24} color="#4CAF50" />
             </View>
-            <Text style={styles.statNumber}>{programs.length}</Text>
+            <Text style={styles.statNumber}>{stats.totalPrograms}</Text>
             <Text style={styles.statLabel}>Total Programs</Text>
           </View>
         </View>
       </ScrollView>
 
-      {/* Add/Edit Program Modal */}
-      <Modal visible={dialogVisible} transparent={true} animationType="slide" onRequestClose={closeModal}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>{isAddProgram ? "Add New Program" : "Edit Program"}</Text>
-              <TouchableOpacity onPress={closeModal}>
-                <Ionicons name="close" size={24} color="#333" />
-              </TouchableOpacity>
-            </View>
 
-            <ScrollView style={styles.modalBody}>
-              <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>Program ID</Text>
-                <TextInput
-                  style={[styles.formInput, form.errors.programId && styles.inputError]}
-                  value={form.programId}
-                  onChangeText={(text) => setForm((prev) => ({ ...prev, programId: text }))}
-                  placeholder="Enter program ID"
-                />
-                <InputError message={form.errors.programId} />
-              </View>
+<Modal visible={dialogVisible} transparent={true} animationType="slide" onRequestClose={closeModal}>
+  <View style={styles.modalOverlay}>
+    <View style={styles.modalContainer}>
+      <View style={styles.modalHeader}>
+        <Text style={styles.modalTitle}>{isAddProgram ? "Add New Program" : "Edit Program"}</Text>
+        <TouchableOpacity onPress={closeModal}>
+          <Ionicons name="close" size={24} color="#333" />
+        </TouchableOpacity>
+      </View>
 
-              <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>Program Name</Text>
-                <TextInput
-                  style={[styles.formInput, form.errors.programName && styles.inputError]}
-                  value={form.programName}
-                  onChangeText={(text) => setForm((prev) => ({ ...prev, programName: text }))}
-                  placeholder="Enter program name"
-                />
-                <InputError message={form.errors.programName} />
-              </View>
-
-              <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>Description</Text>
-                <TextInput
-                  style={[styles.formInput, form.errors.description && styles.inputError, { height: 80 }]}
-                  value={form.description}
-                  onChangeText={(text) => setForm((prev) => ({ ...prev, description: text }))}
-                  placeholder="Enter program description"
-                  multiline
-                  numberOfLines={4}
-                />
-                <InputError message={form.errors.description} />
-              </View>
-            </ScrollView>
-
-            <View style={styles.modalFooter}>
-              <TouchableOpacity style={styles.cancelButton} onPress={closeModal}>
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.submitButton, form.processing && styles.disabledButton]}
-                onPress={submit}
-                disabled={form.processing}
-              >
-                {form.processing ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Text style={styles.submitButtonText}>
-                    {isAddProgram ? "Add Program" : "Update Program"}
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
+      <ScrollView style={styles.modalBody}>
+        <View style={styles.formGroup}>
+          <Text style={styles.formLabel}>Program Name</Text>
+          <TextInput
+            style={[styles.formInput, form.errors.programName && styles.inputError]}
+            value={form.programName} // Fixed: Use form.programName instead of selectedProgramName
+            onChangeText={(text) => setForm((prev) => ({ ...prev, programName: text }))}
+            placeholder="Enter program name"
+          />
+          <InputError message={form.errors.programName} />
         </View>
-      </Modal>
+
+        <View style={styles.formGroup}>
+          <Text style={styles.formLabel}>Description</Text>
+          <TextInput
+            style={[styles.formInput, form.errors.description && styles.inputError, { height: 80 }]}
+            value={form.description}
+            onChangeText={(text) => setForm((prev) => ({ ...prev, description: text }))}
+            placeholder="Enter program description"
+            multiline
+            numberOfLines={4}
+          />
+          <InputError message={form.errors.description} />
+        </View>
+      </ScrollView>
+
+      <View style={styles.modalFooter}>
+        <TouchableOpacity style={styles.cancelButton} onPress={closeModal}>
+          <Text style={styles.cancelButtonText}>Cancel</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.submitButton, form.processing && styles.disabledButton]}
+          onPress={submit}
+          disabled={form.processing}
+        >
+          {form.processing ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <Text style={styles.submitButtonText}>
+              {isAddProgram ? "Add Program" : "Update Program"}
+            </Text>
+          )}
+        </TouchableOpacity>
+      </View>
+    </View>
+  </View>
+</Modal>
 
       {/* Toast Notification */}
       <Toast

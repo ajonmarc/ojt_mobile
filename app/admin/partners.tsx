@@ -1,9 +1,10 @@
 import { View, ScrollView, Text, TouchableOpacity, StyleSheet, TextInput, Modal, Alert, ActivityIndicator } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useState, useEffect } from "react";
-import Sidebar from "@/components/Sidebar";
-import Navbar from "@/components/Navbar";
-import Header from "@/components/Header";
+import Sidebar from "../../components/Sidebar";
+import Navbar from "../../components/Navbar";
+import Header from "../../components/Header";
+import api from "../../axios"; // Import the Axios instance
 
 // Define types
 interface Partner {
@@ -13,7 +14,13 @@ interface Partner {
   phone: string;
   email: string;
   contactPerson: string;
-  status: "Active" | "Inactive";
+  status: string;
+}
+
+interface Stats {
+  totalPartners: number;
+  activePartners: number;
+  inactivePartners: number;
 }
 
 interface FormErrors {
@@ -26,12 +33,12 @@ interface FormErrors {
 }
 
 // Toast component for notifications
-const Toast = ({ message, visible, onClose }: { message: string; visible: boolean; onClose: () => void }) => {
-  if (!visible) return null;
+const Toast = ({ message, ...props }: { message: { text: string, isError?: boolean }, visible: boolean; onClose: () => void }) => {
+  if (!props.visible) return null;
   return (
-    <View style={[styles.toastContainer, { backgroundColor: message.includes("error") ? "#F44336" : "#4CAF50" }]}>
-      <Text style={styles.toastText}>{message}</Text>
-      <TouchableOpacity onPress={onClose}>
+    <View style={[styles.toastContainer, { backgroundColor: message.isError ? "#F44336" : "#4CAF50" }]}>
+      <Text style={styles.toastText}>{message.text}</Text>
+      <TouchableOpacity onPress={props.onClose}>
         <Ionicons name="close" size={20} color="#fff" />
       </TouchableOpacity>
     </View>
@@ -45,21 +52,9 @@ export default function AdminPartners() {
   const [isAddPartner, setIsAddPartner] = useState(true);
   const [selectedPartnerId, setSelectedPartnerId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [toast, setToast] = useState({ message: "", visible: false });
-
-  // Sample data
-  const [partners, setPartners] = useState<Partner[]>([
-    {
-      id: "1",
-      partnerName: "Tech Corp",
-      address: "123 Tech Street, City",
-      phone: "123-456-7890",
-      email: "contact@techcorp.com",
-      contactPerson: "Jane Smith",
-      status: "Active",
-    },
-  ]);
-
+  const [toast, setToast] = useState({ message: { text: "", isError: false }, visible: false });
+  const [partners, setPartners] = useState<Partner[]>([]);
+  const [stats, setStats] = useState<Stats>({ totalPartners: 0, activePartners: 0, inactivePartners: 0 });
   const [form, setForm] = useState({
     partnerName: "",
     address: "",
@@ -70,11 +65,34 @@ export default function AdminPartners() {
     errors: {} as FormErrors,
     processing: false,
   });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch data from the backend
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        const response = await api.get("/admin/partners");
+        const { partners, stats } = response.data;
+        setPartners(partners);
+        setStats(stats);
+        setError(null);
+      } catch (err: any) {
+        setError("Failed to fetch partners. Please try again.");
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, []);
 
   // Auto-dismiss toast after 3 seconds
   useEffect(() => {
     if (toast.visible) {
-      const timer = setTimeout(() => setToast({ message: "", visible: false }), 3000);
+      const timer = setTimeout(() => setToast({ message: { text: "", isError: false }, visible: false }), 3000);
       return () => clearTimeout(timer);
     }
   }, [toast.visible]);
@@ -89,6 +107,7 @@ export default function AdminPartners() {
 
   const openAddModal = () => {
     setIsAddPartner(true);
+    setSelectedPartnerId(null);
     setForm({
       partnerName: "",
       address: "",
@@ -120,6 +139,7 @@ export default function AdminPartners() {
 
   const closeModal = () => {
     setDialogVisible(false);
+    setSelectedPartnerId(null);
     setForm({
       partnerName: "",
       address: "",
@@ -173,49 +193,79 @@ export default function AdminPartners() {
     return isValid;
   };
 
-  const submit = () => {
+  const submit = async () => {
     if (!validateForm()) {
-      setToast({ message: "Please fix the errors in the form.", visible: true });
+      setToast({ message: { text: "Please fix the errors in the form.", isError: true }, visible: true });
       return;
     }
 
     setForm((prev) => ({ ...prev, processing: true }));
 
-    setTimeout(() => {
+    try {
       if (isAddPartner) {
-        const newPartner: Partner = {
-          id: Date.now().toString(),
+        // Add new partner
+        const response = await api.post("/admin/partners", {
           partnerName: form.partnerName,
           address: form.address,
           phone: form.phone,
           email: form.email,
           contactPerson: form.contactPerson,
-          status: form.status as "Active" | "Inactive",
-        };
-        setPartners((prev) => [...prev, newPartner]);
-        setToast({ message: `Partner ${form.partnerName} added successfully!`, visible: true });
+          status: form.status,
+        });
+        setPartners((prev) => [...prev, response.data.partner]);
+        setStats((prev) => ({
+          totalPartners: prev.totalPartners + 1,
+          activePartners: form.status === "Active" ? prev.activePartners + 1 : prev.activePartners,
+          inactivePartners: form.status === "Inactive" ? prev.inactivePartners + 1 : prev.inactivePartners,
+        }));
+        setToast({ message: { text: response.data.message, isError: false }, visible: true });
       } else if (selectedPartnerId) {
+        // Update existing partner
+        const response = await api.put(`/admin/partners/${selectedPartnerId}`, {
+          partnerName: form.partnerName,
+          address: form.address,
+          phone: form.phone,
+          email: form.email,
+          contactPerson: form.contactPerson,
+          status: form.status,
+        });
         setPartners((prev) =>
           prev.map((partner) =>
-            partner.id === selectedPartnerId
-              ? {
-                  ...partner,
-                  partnerName: form.partnerName,
-                  address: form.address,
-                  phone: form.phone,
-                  email: form.email,
-                  contactPerson: form.contactPerson,
-                  status: form.status as "Active" | "Inactive",
-                }
-              : partner
+            partner.id === selectedPartnerId ? response.data.partner : partner
           )
         );
-        setToast({ message: `Partner ${form.partnerName} updated successfully!`, visible: true });
+        setStats((prev) => {
+          const oldPartner = partners.find((p) => p.id === selectedPartnerId);
+          return {
+            totalPartners: prev.totalPartners,
+            activePartners:
+              oldPartner?.status === "Active" && form.status === "Inactive"
+                ? prev.activePartners - 1
+                : oldPartner?.status === "Inactive" && form.status === "Active"
+                ? prev.activePartners + 1
+                : prev.activePartners,
+            inactivePartners:
+              oldPartner?.status === "Inactive" && form.status === "Active"
+                ? prev.inactivePartners - 1
+                : oldPartner?.status === "Active" && form.status === "Inactive"
+                ? prev.inactivePartners + 1
+                : prev.inactivePartners,
+          };
+        });
+        setToast({ message: { text: response.data.message, isError: false }, visible: true });
       }
-
-      setForm((prev) => ({ ...prev, processing: false }));
       closeModal();
-    }, 1000);
+    } catch (err: any) {
+      if (err.response?.status === 422) {
+        setForm((prev) => ({ ...prev, errors: err.response.data.errors }));
+        setToast({ message: { text: "Please fix the errors in the form.", isError: true }, visible: true });
+      } else {
+        setToast({ message: { text: err.response?.data?.message || "An error occurred. Please try again.", isError: true }, visible: true });
+        console.error(err);
+      }
+    } finally {
+      setForm((prev) => ({ ...prev, processing: false }));
+    }
   };
 
   const handleDelete = (id: string, partnerName: string) => {
@@ -227,9 +277,24 @@ export default function AdminPartners() {
         {
           text: "Delete",
           style: "destructive",
-          onPress: () => {
-            setPartners((prev) => prev.filter((partner) => partner.id !== id));
-            setToast({ message: `Partner ${partnerName} deleted successfully!`, visible: true });
+          onPress: async () => {
+            try {
+              const response = await api.delete(`/admin/partners/${id}`);
+              const deletedPartner = partners.find((p) => p.id === id);
+              setPartners((prev) => prev.filter((partner) => partner.id !== id));
+              setStats((prev) => ({
+                totalPartners: prev.totalPartners - 1,
+                activePartners: deletedPartner?.status === "Active" ? prev.activePartners - 1 : prev.activePartners,
+                inactivePartners: deletedPartner?.status === "Inactive" ? prev.inactivePartners - 1 : prev.inactivePartners,
+              }));
+              setToast({ message: { text: response.data.message, isError: false }, visible: true });
+            } catch (err: any) {
+              setToast({
+                message: { text: err.response?.data?.message || "Failed to delete partner. Please try again.", isError: true },
+                visible: true,
+              });
+              console.error(err);
+            }
           },
         },
       ],
@@ -264,8 +329,21 @@ export default function AdminPartners() {
     actions: 120,
   };
 
-  const activePartners = partners.filter((partner) => partner.status === "Active").length;
-  const inactivePartners = partners.filter((partner) => partner.status === "Inactive").length;
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <ActivityIndicator size="large" color="#4CAF50" />
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.errorText}>{error}</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -375,21 +453,21 @@ export default function AdminPartners() {
             <View style={styles.statIconContainer}>
               <Ionicons name="business" size={24} color="#4CAF50" />
             </View>
-            <Text style={styles.statNumber}>{partners.length}</Text>
+            <Text style={styles.statNumber}>{stats.totalPartners}</Text>
             <Text style={styles.statLabel}>Total Partners</Text>
           </View>
           <View style={styles.statCard}>
             <View style={styles.statIconContainer}>
               <Ionicons name="business" size={24} color="#4CAF50" />
             </View>
-            <Text style={styles.statNumber}>{activePartners}</Text>
+            <Text style={styles.statNumber}>{stats.activePartners}</Text>
             <Text style={styles.statLabel}>Active</Text>
           </View>
           <View style={styles.statCard}>
             <View style={styles.statIconContainer}>
               <Ionicons name="business" size={24} color="#4CAF50" />
             </View>
-            <Text style={styles.statNumber}>{inactivePartners}</Text>
+            <Text style={styles.statNumber}>{stats.inactivePartners}</Text>
             <Text style={styles.statLabel}>Inactive</Text>
           </View>
         </View>
@@ -524,7 +602,7 @@ export default function AdminPartners() {
       <Toast
         message={toast.message}
         visible={toast.visible}
-        onClose={() => setToast({ message: "", visible: false })}
+        onClose={() => setToast({ message: { text: "", isError: false }, visible: false })}
       />
 
       <Navbar activeRoute="admin/partners" />

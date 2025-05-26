@@ -5,13 +5,48 @@ import Sidebar from "@/components/Sidebar";
 import Navbar from "@/components/Navbar";
 import Header from "@/components/Header";
 import { BarChart, LineChart, PieChart } from "react-native-chart-kit";
+import { WebView } from 'react-native-webview';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
+import * as Print from 'expo-print';
+import api from "../../axios"; // Axios instance
 
 // Screen width for chart responsiveness
 const screenWidth = Dimensions.get("window").width;
 
 // Define types
-interface ReportRow {
-  [key: string]: string | number;
+interface Application {
+  id: number;
+  user_id: number;
+  partner_id: number | null;
+  status: string;
+  resume_path: string | null;
+  letter_path: string | null;
+  preferred_company: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  completed_hours: number;
+  required_hours: number;
+  remarks: string | null;
+  application_date: string | null;
+}
+
+interface Program {
+  id: number;
+  programName: string;
+  programDescription: string;
+  status: string;
+}
+
+interface User {
+  id: number;
+  name: string;
+  email: string;
+  studentId: string | null;
+  studentPhone: string | null;
+  ojtProgram: string | null;
+  status: string | null;
+  role: string;
 }
 
 interface Stats {
@@ -23,6 +58,16 @@ interface Stats {
   inactive?: number;
   onOJT?: number;
   completed?: number;
+}
+
+interface ReportData {
+  applicationStats: Stats;
+  partnerStats: Stats;
+  studentStats: Stats;
+  monthlyApplications: number[];
+  applications: Application[];
+  programs: Program[];
+  users: User[];
 }
 
 // Toast component for notifications
@@ -41,48 +86,92 @@ const Toast = ({ message, visible, onClose }: { message: string; visible: boolea
 export default function AdminReports() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [semester, setSemester] = useState("1st Semester, A.Y. 2023");
-  const [reportModalVisible, setReportModalVisible] = useState(false);
   const [toast, setToast] = useState({ message: "", visible: false });
   const [selectedReportType, setSelectedReportType] = useState("applications");
-  const [selectedDateRange, setSelectedDateRange] = useState("all");
   const [selectedStatus, setSelectedStatus] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [reportData, setReportData] = useState<ReportRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [reportData, setReportData] = useState<ReportData>({
+    applicationStats: { total: 0, pending: 0, approved: 0, rejected: 0 },
+    partnerStats: { total: 0, active: 0, inactive: 0 },
+    studentStats: { total: 0, onOJT: 0, completed: 0 },
+    monthlyApplications: [0, 0, 0, 0, 0, 0],
+    applications: [],
+    programs: [],
+    users: [],
+  });
 
-  // Mock stats data (replace with API data)
-  const applicationStats: Stats = {
-    total: 100,
-    pending: 30,
-    approved: 50,
-    rejected: 20,
-  };
+  // Fetch report data from backend
+  useEffect(() => {
+    const fetchReportData = async () => {
+      try {
+        setLoading(true);
+        const response = await api.get('/admin/report', {
+          params: { semester }, // Pass semester as query parameter
+        });
 
-  const partnerStats: Stats = {
-    total: 25,
-    active: 20,
-    inactive: 5,
-  };
+        const data = response.data;
+        setReportData({
+          applicationStats: {
+            total: data.applicationStats?.total || 0,
+            pending: data.applicationStats?.pending || 0,
+            approved: data.applicationStats?.approved || 0,
+            rejected: data.applicationStats?.rejected || 0,
+          },
+          partnerStats: {
+            total: data.partnerStats?.total || 0,
+            active: data.partnerStats?.active || 0,
+            inactive: data.partnerStats?.inactive || 0,
+          },
+          studentStats: {
+            total: data.studentStats?.total || 0,
+            onOJT: data.studentStats?.onOJT || 0,
+            completed: data.studentStats?.completed || 0,
+          },
+          monthlyApplications: data.monthlyApplications || [0, 0, 0, 0, 0, 0],
+          applications: Array.isArray(data.applications) ? data.applications : [],
+          programs: Array.isArray(data.programs) ? data.programs : [],
+          users: Array.isArray(data.users) ? data.users : [],
+        });
+        setToast({ message: "Data loaded successfully", visible: true });
+      } catch (error) {
+        console.error("Error fetching report data:", error);
+        setToast({ message: "Error fetching report data", visible: true });
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  const studentStats: Stats = {
-    total: 200,
-    onOJT: 80,
-    completed: 120,
-  };
+    fetchReportData();
+  }, [semester]); // Refetch when semester changes
 
-  // Mock chart data
+  // Auto-dismiss toast after 3 seconds
+  useEffect(() => {
+    if (toast.visible) {
+      const timer = setTimeout(() => setToast({ message: "", visible: false }), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast.visible]);
+
+  // Chart data
   const applicationChartData = {
     labels: ["Pending", "Approved", "Rejected"],
-    datasets: [{ data: [applicationStats.pending, applicationStats.approved, applicationStats.rejected] }],
+    datasets: [{
+      data: [
+        reportData.applicationStats.pending || 0,
+        reportData.applicationStats.approved || 0,
+        reportData.applicationStats.rejected || 0,
+      ],
+    }],
   };
 
   const monthlyApplicationsData = {
     labels: ["Jan", "Feb", "Mar", "Apr", "May", "Jun"],
-    datasets: [{ data: [10, 15, 20, 25, 30, 35] }],
+    datasets: [{ data: reportData.monthlyApplications }],
   };
 
   const completionRatesData = {
     labels: ["On OJT", "Completed"],
-    datasets: [{ data: [studentStats.onOJT, studentStats.completed] }],
+    datasets: [{ data: [reportData.studentStats.onOJT || 0, reportData.studentStats.completed || 0] }],
   };
 
   const chartConfig = {
@@ -96,14 +185,6 @@ export default function AdminReports() {
     propsForDots: { r: "6", strokeWidth: "2", stroke: "#4CAF50" },
   };
 
-  // Auto-dismiss toast after 3 seconds
-  useEffect(() => {
-    if (toast.visible) {
-      const timer = setTimeout(() => setToast({ message: "", visible: false }), 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [toast.visible]);
-
   const toggleSidebar = () => {
     setSidebarOpen(!sidebarOpen);
   };
@@ -112,87 +193,29 @@ export default function AdminReports() {
     setSemester(newSemester);
   };
 
-  const openReportModal = () => {
-    setReportModalVisible(true);
-  };
-
-  const closeReportModal = () => {
-    setReportModalVisible(false);
-    setSelectedReportType("applications");
-    setSelectedDateRange("all");
-    setSelectedStatus("");
-  };
-
-  const generateReport = () => {
-    setIsLoading(true);
-    setTimeout(() => {
-      // Mock report data based on filters
-      let mockData: ReportRow[] = [];
-      if (selectedReportType === "applications") {
-        mockData = [
-          {
-            studentName: "John Doe",
-            studentId: "2021-00445",
-            program: "Computer Science",
-            status: selectedStatus || "Pending",
-            applicationDate: "2023-10-01",
-          },
-          {
-            studentName: "Jane Smith",
-            studentId: "2021-00446",
-            program: "Information Technology",
-            status: selectedStatus || "Approved",
-            applicationDate: "2023-10-02",
-          },
-        ].filter((row) => !selectedStatus || row.status === selectedStatus);
-      } else if (selectedReportType === "partners") {
-        mockData = [
-          { partnerName: "Tech Corp", status: "Active", totalApplications: 10 },
-          { partnerName: "Inno Solutions", status: "Inactive", totalApplications: 5 },
-        ];
-      } else if (selectedReportType === "students") {
-        mockData = [
-          { studentName: "John Doe", studentId: "2021-00445", status: "On OJT" },
-          { studentName: "Jane Smith", studentId: "2021-00446", status: "Completed" },
-        ];
-      }
-
-      setReportData(mockData);
-      setToast({ message: "Report generated successfully!", visible: true });
-      setIsLoading(false);
-      closeReportModal();
-    }, 1000);
-  };
-
-  const downloadReport = () => {
-    // Mock download action
-    setToast({ message: "Download initiated (mock action).", visible: true });
-    // In production, implement CSV export with backend
-  };
-
   // Calculate percentages for progress bars
-  const getPendingPercentage = applicationStats.total
-    ? ((applicationStats.pending! / applicationStats.total) * 100).toFixed(1)
+  const getPendingPercentage = reportData.applicationStats.total
+    ? ((reportData.applicationStats.pending! / reportData.applicationStats.total) * 100).toFixed(1)
     : "0";
-  const getApprovedPercentage = applicationStats.total
-    ? ((applicationStats.approved! / applicationStats.total) * 100).toFixed(1)
+  const getApprovedPercentage = reportData.applicationStats.total
+    ? ((reportData.applicationStats.approved! / reportData.applicationStats.total) * 100).toFixed(1)
     : "0";
-  const getRejectedPercentage = applicationStats.total
-    ? ((applicationStats.rejected! / applicationStats.total) * 100).toFixed(1)
-    : "0";
-
-  const getActivePartnersPercentage = partnerStats.total
-    ? ((partnerStats.active! / partnerStats.total) * 100).toFixed(1)
-    : "0";
-  const getInactivePartnersPercentage = partnerStats.total
-    ? ((partnerStats.inactive! / partnerStats.total) * 100).toFixed(1)
+  const getRejectedPercentage = reportData.applicationStats.total
+    ? ((reportData.applicationStats.rejected! / reportData.applicationStats.total) * 100).toFixed(1)
     : "0";
 
-  const getOnOJTPercentage = studentStats.total
-    ? ((studentStats.onOJT! / studentStats.total) * 100).toFixed(1)
+  const getActivePartnersPercentage = reportData.partnerStats.total
+    ? ((reportData.partnerStats.active! / reportData.partnerStats.total) * 100).toFixed(1)
     : "0";
-  const getCompletedPercentage = studentStats.total
-    ? ((studentStats.completed! / studentStats.total) * 100).toFixed(1)
+  const getInactivePartnersPercentage = reportData.partnerStats.total
+    ? ((reportData.partnerStats.inactive! / reportData.partnerStats.total) * 100).toFixed(1)
+    : "0";
+
+  const getOnOJTPercentage = reportData.studentStats.total
+    ? ((reportData.studentStats.onOJT! / reportData.studentStats.total) * 100).toFixed(1)
+    : "0";
+  const getCompletedPercentage = reportData.studentStats.total
+    ? ((reportData.studentStats.completed! / reportData.studentStats.total) * 100).toFixed(1)
     : "0";
 
   // Format header for table
@@ -202,6 +225,171 @@ export default function AdminReports() {
       .replace(/^./, (str) => str.toUpperCase())
       .replace("Id", "ID");
   };
+
+  // Generate report PDF
+  const generateReport = async () => {
+    try {
+      setLoading(true);
+      const applications = Array.isArray(reportData.applications) ? reportData.applications : [];
+      const programs = Array.isArray(reportData.programs) ? reportData.programs : [];
+      const users = Array.isArray(reportData.users) ? reportData.users : [];
+
+      const htmlContent = `
+        <html>
+          <head>
+            <style>
+              body { font-family: Arial, sans-serif; margin: 40px; }
+              h1, h2 { color: #333; }
+              table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+              th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+              th { background-color: #4CAF50; color: white; }
+              tr:nth-child(even) { background-color: #f2f2f2; }
+              .section { margin-bottom: 30px; }
+              .stats { margin-bottom: 20px; }
+              .stats p { margin: 5px 0; }
+              .no-data { color: #666; font-style: italic; }
+            </style>
+          </head>
+          <body>
+            <h1>Internship Report - ${semester}</h1>
+
+            <div class="section">
+              <h2>Application Statistics</h2>
+              <div class="stats">
+                <p><strong>Total Applications:</strong> ${reportData.applicationStats.total}</p>
+                <p><strong>Pending:</strong> ${reportData.applicationStats.pending || 0}</p>
+                <p><strong>Approved:</strong> ${reportData.applicationStats.approved || 0}</p>
+                <p><strong>Rejected:</strong> ${reportData.applicationStats.rejected || 0}</p>
+              </div>
+              <h3>Application Details</h3>
+              ${applications.length > 0 ? `
+                <table>
+                  <tr>
+                    <th>ID</th>
+                    <th>User ID</th>
+                    <th>Partner ID</th>
+                    <th>Status</th>
+                    <th>Preferred Company</th>
+                    <th>Start Date</th>
+                    <th>End Date</th>
+                    <th>Completed Hours</th>
+                    <th>Required Hours</th>
+                    <th>Application Date</th>
+                    <th>Remarks</th>
+                  </tr>
+                  ${applications.map(app => `
+                    <tr>
+                      <td>${app.id || 'N/A'}</td>
+                      <td>${app.user_id || 'N/A'}</td>
+                      <td>${app.partner_id || 'N/A'}</td>
+                      <td>${app.status || 'N/A'}</td>
+                      <td>${app.preferred_company || 'N/A'}</td>
+                      <td>${app.start_date || 'N/A'}</td>
+                      <td>${app.end_date || 'N/A'}</td>
+                      <td>${app.completed_hours || 0}</td>
+                      <td>${app.required_hours || 0}</td>
+                      <td>${app.application_date || 'N/A'}</td>
+                      <td>${app.remarks || 'N/A'}</td>
+                    </tr>
+                  `).join('')}
+                </table>
+              ` : '<p class="no-data">No application data available</p>'}
+            </div>
+
+            <div class="section">
+              <h2>Partner Statistics</h2>
+              <div class="stats">
+                <p><strong>Total Partners:</strong> ${reportData.partnerStats.total}</p>
+                <p><strong>Active:</strong> ${reportData.partnerStats.active || 0}</p>
+                <p><strong>Inactive:</strong> ${reportData.partnerStats.inactive || 0}</p>
+              </div>
+              <h3>Partner Details</h3>
+              ${programs.length > 0 ? `
+                <table>
+                  <tr>
+                    <th>ID</th>
+                    <th>Program Name</th>
+                    <th>Description</th>
+                    <th>Status</th>
+                  </tr>
+                  ${programs.map(program => `
+                    <tr>
+                      <td>${program.id || 'N/A'}</td>
+                      <td>${program.programName || 'N/A'}</td>
+                      <td>${program.programDescription || 'N/A'}</td>
+                      <td>${program.status || 'N/A'}</td>
+                    </tr>
+                  `).join('')}
+                </table>
+              ` : '<p class="no-data">No partner data available</p>'}
+            </div>
+
+            <div class="section">
+              <h2>Student Statistics</h2>
+              <div class="stats">
+                <p><strong>Total Students:</strong> ${reportData.studentStats.total}</p>
+                <p><strong>On OJT:</strong> ${reportData.studentStats.onOJT || 0}</p>
+                <p><strong>Completed:</strong> ${reportData.studentStats.completed || 0}</p>
+              </div>
+              <h3>Student Details</h3>
+              ${users.length > 0 ? `
+                <table>
+                  <tr>
+                    <th>ID</th>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Student ID</th>
+                    <th>Phone</th>
+                    <th>OJT Program</th>
+                    <th>Status</th>
+                  </tr>
+                  ${users.map(user => `
+                    <tr>
+                      <td>${user.id || 'N/A'}</td>
+                      <td>${user.name || 'N/A'}</td>
+                      <td>${user.email || 'N/A'}</td>
+                      <td>${user.studentId || 'N/A'}</td>
+                      <td>${user.studentPhone || 'N/A'}</td>
+                      <td>${user.ojtProgram || 'N/A'}</td>
+                      <td>${user.status || 'N/A'}</td>
+                    </tr>
+                  `).join('')}
+                </table>
+              ` : '<p class="no-data">No student data available</p>'}
+            </div>
+
+            <div class="section">
+              <h2>Monthly Applications Trend</h2>
+              <p>January: ${reportData.monthlyApplications[0] || 0}</p>
+              <p>February: ${reportData.monthlyApplications[1] || 0}</p>
+              <p>March: ${reportData.monthlyApplications[2] || 0}</p>
+              <p>April: ${reportData.monthlyApplications[3] || 0}</p>
+              <p>May: ${reportData.monthlyApplications[4] || 0}</p>
+              <p>June: ${reportData.monthlyApplications[5] || 0}</p>
+            </div>
+          </body>
+        </html>
+      `;
+
+      const { uri } = await Print.printToFileAsync({ html: htmlContent });
+      await Sharing.shareAsync(uri);
+      setToast({ message: "Report generated and shared successfully", visible: true });
+    } catch (error) {
+      console.error("Error generating report:", error);
+      setToast({ message: `Error generating report: ${error.message}`, visible: true });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#4CAF50" />
+        <Text style={styles.loadingText}>Loading report data...</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -222,21 +410,21 @@ export default function AdminReports() {
               <View style={styles.statRow}>
                 <View style={styles.statItem}>
                   <Text style={styles.statLabel}>Total</Text>
-                  <Text style={[styles.statValue, styles.totalValue]}>{applicationStats.total}</Text>
+                  <Text style={[styles.statValue, styles.totalValue]}>{reportData.applicationStats.total}</Text>
                 </View>
                 <View style={styles.statItem}>
                   <Text style={styles.statLabel}>Pending</Text>
-                  <Text style={[styles.statValue, styles.pendingValue]}>{applicationStats.pending}</Text>
+                  <Text style={[styles.statValue, styles.pendingValue]}>{reportData.applicationStats.pending || 0}</Text>
                 </View>
               </View>
               <View style={styles.statRow}>
                 <View style={styles.statItem}>
                   <Text style={styles.statLabel}>Approved</Text>
-                  <Text style={[styles.statValue, styles.approvedValue]}>{applicationStats.approved}</Text>
+                  <Text style={[styles.statValue, styles.approvedValue]}>{reportData.applicationStats.approved || 0}</Text>
                 </View>
                 <View style={styles.statItem}>
                   <Text style={styles.statLabel}>Rejected</Text>
-                  <Text style={[styles.statValue, styles.rejectedValue]}>{applicationStats.rejected}</Text>
+                  <Text style={[styles.statValue, styles.rejectedValue]}>{reportData.applicationStats.rejected || 0}</Text>
                 </View>
               </View>
               <View style={styles.progressBar}>
@@ -257,17 +445,17 @@ export default function AdminReports() {
               <View style={styles.statRow}>
                 <View style={styles.statItem}>
                   <Text style={styles.statLabel}>Total</Text>
-                  <Text style={[styles.statValue, styles.totalValue]}>{partnerStats.total}</Text>
+                  <Text style={[styles.statValue, styles.totalValue]}>{reportData.partnerStats.total}</Text>
                 </View>
                 <View style={styles.statItem}>
                   <Text style={styles.statLabel}>Active</Text>
-                  <Text style={[styles.statValue, styles.approvedValue]}>{partnerStats.active}</Text>
+                  <Text style={[styles.statValue, styles.approvedValue]}>{reportData.partnerStats.active || 0}</Text>
                 </View>
               </View>
               <View style={styles.statRow}>
                 <View style={[styles.statItem, styles.fullWidth]}>
                   <Text style={styles.statLabel}>Inactive</Text>
-                  <Text style={[styles.statValue, styles.rejectedValue]}>{partnerStats.inactive}</Text>
+                  <Text style={[styles.statValue, styles.rejectedValue]}>{reportData.partnerStats.inactive || 0}</Text>
                 </View>
               </View>
               <View style={styles.progressBar}>
@@ -287,17 +475,17 @@ export default function AdminReports() {
               <View style={styles.statRow}>
                 <View style={styles.statItem}>
                   <Text style={styles.statLabel}>Total</Text>
-                  <Text style={[styles.statValue, styles.totalValue]}>{studentStats.total}</Text>
+                  <Text style={[styles.statValue, styles.totalValue]}>{reportData.studentStats.total}</Text>
                 </View>
                 <View style={styles.statItem}>
                   <Text style={styles.statLabel}>On OJT</Text>
-                  <Text style={[styles.statValue, styles.pendingValue]}>{studentStats.onOJT}</Text>
+                  <Text style={[styles.statValue, styles.pendingValue]}>{reportData.studentStats.onOJT || 0}</Text>
                 </View>
               </View>
               <View style={styles.statRow}>
                 <View style={[styles.statItem, styles.fullWidth]}>
                   <Text style={styles.statLabel}>Completed</Text>
-                  <Text style={[styles.statValue, styles.approvedValue]}>{studentStats.completed}</Text>
+                  <Text style={[styles.statValue, styles.approvedValue]}>{reportData.studentStats.completed || 0}</Text>
                 </View>
               </View>
               <View style={styles.progressBar}>
@@ -315,7 +503,10 @@ export default function AdminReports() {
             <BarChart
               data={{
                 ...applicationChartData,
-                datasets: [{ ...applicationChartData.datasets[0], backgroundColor: ["#FF9800", "#4CAF50", "#F44336"] }],
+                datasets: [{
+                  ...applicationChartData.datasets[0],
+                  backgroundColor: ["#FF9800", "#4CAF50", "#F44336"],
+                }],
               }}
               width={screenWidth - 80}
               height={220}
@@ -345,14 +536,14 @@ export default function AdminReports() {
               data={[
                 {
                   name: "On OJT",
-                  population: studentStats.onOJT || 0,
+                  population: reportData.studentStats.onOJT || 0,
                   color: "#FF9800",
                   legendFontColor: "#333",
                   legendFontSize: 14,
                 },
                 {
                   name: "Completed",
-                  population: studentStats.completed || 0,
+                  population: reportData.studentStats.completed || 0,
                   color: "#4CAF50",
                   legendFontColor: "#333",
                   legendFontSize: 14,
@@ -372,175 +563,16 @@ export default function AdminReports() {
         {/* Report Generator */}
         <View style={styles.reportGenerator}>
           <Text style={styles.sectionTitle}>Generate Report</Text>
-          <TouchableOpacity style={styles.generateButton} onPress={openReportModal}>
-            <Text style={styles.generateButtonText}>Open Report Generator</Text>
+          <TouchableOpacity style={styles.generateButton} onPress={generateReport}>
+            <Text style={styles.generateButtonText}>GENERATE</Text>
           </TouchableOpacity>
         </View>
-
-        {/* Report Results */}
-        {reportData.length > 0 && (
-          <View style={styles.reportResults}>
-            <View style={styles.reportHeader}>
-              <Text style={styles.reportTitle}>Report Results</Text>
-              <TouchableOpacity style={styles.downloadButton} onPress={downloadReport}>
-                <Text style={styles.downloadButtonText}>Download CSV</Text>
-              </TouchableOpacity>
-            </View>
-            <View style={styles.tableContainer}>
-              <ScrollView horizontal showsHorizontalScrollIndicator={true}>
-                <View>
-                  <View style={styles.tableHeader}>
-                    {reportData[0] &&
-                      Object.keys(reportData[0]).map((header) => (
-                        <Text key={header} style={[styles.headerCell, { width: 150 }]}>
-                          {formatHeader(header)}
-                        </Text>
-                      ))}
-                  </View>
-                  <View style={styles.tableBody}>
-                    {reportData.map((row, index) => (
-                      <View key={index} style={styles.tableRow}>
-                        {Object.values(row).map((value, i) => (
-                          <Text key={i} style={[styles.tableCell, { width: 150 }]} numberOfLines={1}>
-                            {value.toString()}
-                          </Text>
-                        ))}
-                      </View>
-                    ))}
-                  </View>
-                </View>
-              </ScrollView>
-            </View>
-          </View>
-        )}
       </ScrollView>
-
-      {/* Report Generator Modal */}
-      <Modal visible={reportModalVisible} transparent={true} animationType="slide" onRequestClose={closeReportModal}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Generate Report</Text>
-              <TouchableOpacity onPress={closeReportModal}>
-                <Ionicons name="close" size={24} color="#333" />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView style={styles.modalBody}>
-              <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>Report Type</Text>
-                <TouchableOpacity
-                  style={styles.formSelect}
-                  onPress={() => {
-                    Alert.alert(
-                      "Select Report Type",
-                      "Choose a report type",
-                      [
-                        { text: "Applications", onPress: () => setSelectedReportType("applications") },
-                        { text: "Partners", onPress: () => setSelectedReportType("partners") },
-                        { text: "Students", onPress: () => setSelectedReportType("students") },
-                        { text: "Cancel", style: "cancel" },
-                      ],
-                      { cancelable: true }
-                    );
-                  }}
-                >
-                  <Text style={styles.selectText}>
-                    {selectedReportType.charAt(0).toUpperCase() + selectedReportType.slice(1)}
-                  </Text>
-                  <Ionicons name="chevron-down" size={20} color="#666" />
-                </TouchableOpacity>
-              </View>
-
-              <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>Date Range</Text>
-                <TouchableOpacity
-                  style={styles.formSelect}
-                  onPress={() => {
-                    Alert.alert(
-                      "Select Date Range",
-                      "Choose a date range",
-                      [
-                        { text: "Last Week", onPress: () => setSelectedDateRange("week") },
-                        { text: "Last Month", onPress: () => setSelectedDateRange("month") },
-                        { text: "Last Quarter", onPress: () => setSelectedDateRange("quarter") },
-                        { text: "Last Year", onPress: () => setSelectedDateRange("year") },
-                        { text: "All Time", onPress: () => setSelectedDateRange("all") },
-                        { text: "Cancel", style: "cancel" },
-                      ],
-                      { cancelable: true }
-                    );
-                  }}
-                >
-                  <Text style={styles.selectText}>
-                    {selectedDateRange === "week"
-                      ? "Last Week"
-                      : selectedDateRange === "month"
-                      ? "Last Month"
-                      : selectedDateRange === "quarter"
-                      ? "Last Quarter"
-                      : selectedDateRange === "year"
-                      ? "Last Year"
-                      : "All Time"}
-                  </Text>
-                  <Ionicons name="chevron-down" size={20} color="#666" />
-                </TouchableOpacity>
-              </View>
-
-              {selectedReportType === "applications" && (
-                <View style={styles.formGroup}>
-                  <Text style={styles.formLabel}>Status</Text>
-                  <TouchableOpacity
-                    style={styles.formSelect}
-                    onPress={() => {
-                      Alert.alert(
-                        "Select Status",
-                        "Choose a status",
-                        [
-                          { text: "All", onPress: () => setSelectedStatus("") },
-                          { text: "Pending", onPress: () => setSelectedStatus("Pending") },
-                          { text: "Approved", onPress: () => setSelectedStatus("Approved") },
-                          { text: "Rejected", onPress: () => setSelectedStatus("Rejected") },
-                          { text: "Cancel", style: "cancel" },
-                        ],
-                        { cancelable: true }
-                      );
-                    }}
-                  >
-                    <Text style={styles.selectText}>{selectedStatus || "All"}</Text>
-                    <Ionicons name="chevron-down" size={20} color="#666" />
-                  </TouchableOpacity>
-                </View>
-              )}
-            </ScrollView>
-
-            <View style={styles.modalFooter}>
-              <TouchableOpacity style={styles.cancelButton} onPress={closeReportModal}>
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.submitButton, isLoading && styles.disabledButton]}
-                onPress={generateReport}
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Text style={styles.submitButtonText}>Generate Report</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Toast Notification */}
       <Toast
         message={toast.message}
         visible={toast.visible}
         onClose={() => setToast({ message: "", visible: false })}
       />
-
       <Navbar activeRoute="admin/reports" />
     </View>
   );

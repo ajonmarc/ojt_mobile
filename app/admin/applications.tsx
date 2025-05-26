@@ -1,9 +1,15 @@
-import { View, ScrollView, Text, TouchableOpacity, StyleSheet, TextInput, Modal, Alert, ActivityIndicator, Linking } from "react-native";
+  import { View, ScrollView, Text, TouchableOpacity, StyleSheet, TextInput, Modal, Alert, ActivityIndicator, Linking, Dimensions } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useState, useEffect } from "react";
-import Sidebar from "@/components/Sidebar";
-import Navbar from "@/components/Navbar";
-import Header from "@/components/Header";
+import { WebView } from 'react-native-webview';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
+import * as Print from 'expo-print';
+import Sidebar from "../../components/Sidebar";
+import Navbar from "../../components/Navbar";
+import Header from "../../components/Header";
+import api from "../../axios"; // Axios instance
+import AddApplicationModal from "@/components/AddApplicationModal"; // React Native equivalent
 
 // Define types
 interface Application {
@@ -16,31 +22,36 @@ interface Application {
   hasLetter: boolean;
   status: "Pending" | "Approved" | "Rejected";
   partnerId?: string;
+  partnerName?: string;
   startDate?: string;
   endDate?: string;
   requiredHours?: number;
   remarks?: string;
 }
 
-interface FormErrors {
-  studentId?: string;
-  partnerId?: string;
-  applicationDate?: string;
-  status?: string;
-  requiredHours?: string;
+interface Student {
+  id: string;
+  studentId: string;
+  name: string;
+  program: string;
 }
 
-interface ReviewFormErrors {
+interface Partner {
+  id: string;
+  partnerName: string;
+}
+
+interface FormErrors {
   status?: string;
   requiredHours?: string;
 }
 
 // Toast component for notifications
-const Toast = ({ message, visible, onClose }: { message: string; visible: boolean; onClose: () => void }) => {
+const Toast = ({ message, visible, onClose }: { message: { text: string; isError?: boolean }; visible: boolean; onClose: () => void }) => {
   if (!visible) return null;
   return (
-    <View style={[styles.toastContainer, { backgroundColor: message.includes("error") ? "#F44336" : "#4CAF50" }]}>
-      <Text style={styles.toastText}>{message}</Text>
+    <View style={[styles.toastContainer, { backgroundColor: message.isError ? "#F44336" : "#4CAF50" }]}>
+      <Text style={styles.toastText}>{message.text}</Text>
       <TouchableOpacity onPress={onClose}>
         <Ionicons name="close" size={20} color="#fff" />
       </TouchableOpacity>
@@ -48,47 +59,194 @@ const Toast = ({ message, visible, onClose }: { message: string; visible: boolea
   );
 };
 
+// PDF Viewer Modal Component
+const PDFViewerModal = ({ visible, onClose, pdfUrl, documentTitle, applicationId, documentType }) => {
+  const [downloading, setDownloading] = useState(false);
+  const [printing, setPrinting] = useState(false);
+
+  const downloadPDF = async () => {
+    try {
+      setDownloading(true);
+      const filename = `${documentTitle}_${documentType}.pdf`;
+      const downloadDir = FileSystem.documentDirectory + filename;
+      
+      const { uri } = await FileSystem.downloadAsync(pdfUrl, downloadDir);
+      
+      // Share the downloaded file
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, {
+          mimeType: 'application/pdf',
+          dialogTitle: `Download ${documentTitle} ${documentType}`
+        });
+      } else {
+        Alert.alert('Success', `PDF saved to: ${uri}`);
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to download PDF');
+      console.error('Download error:', error);
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  const printPDF = async () => {
+    try {
+      setPrinting(true);
+      
+      // For printing, we'll create a print job with the PDF URL
+      await Print.printAsync({
+        uri: pdfUrl,
+        printerUrl: pdfUrl // This allows the system to handle PDF printing
+      });
+    } catch (error) {
+      Alert.alert('Error', 'Failed to print PDF');
+      console.error('Print error:', error);
+    } finally {
+      setPrinting(false);
+    }
+  };
+
+  const showDownloadOptions = () => {
+    Alert.alert(
+      'PDF Options',
+      'Choose an action for this PDF',
+      [
+        {
+          text: 'Download',
+          onPress: downloadPDF,
+          style: 'default'
+        },
+        {
+          text: 'Print',
+          onPress: printPDF,
+          style: 'default'
+        },
+        {
+          text: 'Cancel',
+          style: 'cancel'
+        }
+      ]
+    );
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      <View style={styles.pdfModalContainer}>
+        {/* Header */}
+        <View style={styles.pdfModalHeader}>
+          <TouchableOpacity onPress={onClose} style={styles.pdfCloseButton}>
+            <Ionicons name="arrow-back" size={24} color="#333" />
+          </TouchableOpacity>
+          <Text style={styles.pdfModalTitle} numberOfLines={1}>
+            {documentTitle} - {documentType}
+          </Text>
+          <View style={styles.pdfHeaderActions}>
+            <TouchableOpacity 
+              onPress={showDownloadOptions} 
+              style={styles.pdfActionButton}
+              disabled={downloading || printing}
+            >
+              {downloading || printing ? (
+                <ActivityIndicator size="small" color="#4CAF50" />
+              ) : (
+                <Ionicons name="download-outline" size={24} color="#4CAF50" />
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity 
+              onPress={printPDF} 
+              style={styles.pdfActionButton}
+              disabled={downloading || printing}
+            >
+              {printing ? (
+                <ActivityIndicator size="small" color="#2196F3" />
+              ) : (
+                <Ionicons name="print-outline" size={24} color="#2196F3" />
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* PDF Viewer */}
+        <View style={styles.pdfViewer}>
+          <WebView
+            source={{ uri: pdfUrl }}
+            style={styles.webView}
+            startInLoadingState={true}
+            renderLoading={() => (
+              <View style={styles.pdfLoadingContainer}>
+                <ActivityIndicator size="large" color="#4CAF50" />
+                <Text style={styles.pdfLoadingText}>Loading PDF...</Text>
+              </View>
+            )}
+            onError={(syntheticEvent) => {
+              const { nativeEvent } = syntheticEvent;
+              console.warn('WebView error: ', nativeEvent);
+              Alert.alert('Error', 'Failed to load PDF. Please try again.');
+            }}
+            scalesPageToFit={true}
+            javaScriptEnabled={true}
+            domStorageEnabled={true}
+          />
+        </View>
+
+        {/* Bottom Actions */}
+        <View style={styles.pdfModalFooter}>
+          <TouchableOpacity 
+            style={[styles.pdfFooterButton, styles.downloadButton]} 
+            onPress={downloadPDF}
+            disabled={downloading || printing}
+          >
+            {downloading ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <>
+                <Ionicons name="download" size={20} color="#fff" />
+                <Text style={styles.pdfFooterButtonText}>Download</Text>
+              </>
+            )}
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={[styles.pdfFooterButton, styles.printButton]} 
+            onPress={printPDF}
+            disabled={downloading || printing}
+          >
+            {printing ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <>
+                <Ionicons name="print" size={20} color="#fff" />
+                <Text style={styles.pdfFooterButtonText}>Print</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+};
+
 export default function AdminApplications() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [semester, setSemester] = useState("1st Semester, A.Y. 2023");
-  const [addModalVisible, setAddModalVisible] = useState(false);
   const [reviewModalVisible, setReviewModalVisible] = useState(false);
+  const [addModalVisible, setAddModalVisible] = useState(false);
+  const [pdfModalVisible, setPdfModalVisible] = useState(false);
   const [selectedApplicationId, setSelectedApplicationId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [toast, setToast] = useState({ message: "", visible: false });
+  const [toast, setToast] = useState({ message: { text: "", isError: false }, visible: false });
+  const [applications, setApplications] = useState<Application[]>([]);
+  const [students, setStudents] = useState<Student[]>([]);
+  const [partners, setPartners] = useState<Partner[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Sample data
-  const [applications, setApplications] = useState<Application[]>([
-    {
-      id: "1",
-      studentName: "John Doe",
-      studentId: "2021-00445",
-      program: "Computer Science",
-      applicationDate: "2023-10-01",
-      hasResume: true,
-      hasLetter: true,
-      status: "Pending",
-    },
-  ]);
-
-  const [students] = useState([
-    { id: "1", studentId: "2021-00445", name: "John Doe", program: "Computer Science" },
-    { id: "2", studentId: "2021-00446", name: "Jane Smith", program: "Information Technology" },
-  ]);
-
-  const [partners] = useState([
-    { id: "1", partnerName: "Tech Corp" },
-    { id: "2", partnerName: "Inno Solutions" },
-  ]);
-
-  const [addForm, setAddForm] = useState({
-    studentId: "",
-    partnerId: "",
-    applicationDate: "",
-    hasResume: false,
-    hasLetter: false,
-    errors: {} as FormErrors,
-    processing: false,
+  // PDF viewer state
+  const [pdfViewerData, setPdfViewerData] = useState({
+    url: '',
+    title: '',
+    documentType: '',
+    applicationId: ''
   });
 
   const [reviewForm, setReviewForm] = useState({
@@ -96,16 +254,38 @@ export default function AdminApplications() {
     partnerId: "",
     startDate: "",
     endDate: "",
-    requiredHours: "",
+    requiredHours: "600",
     remarks: "",
-    errors: {} as ReviewFormErrors,
+    errors: {} as FormErrors,
     processing: false,
   });
+
+  // Fetch data from the backend
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        const response = await api.get("/admin/applications");
+        const { applications, students, partners } = response.data;
+        setApplications(applications);
+        setStudents(students);
+        setPartners(partners);
+        setError(null);
+      } catch (err: any) {
+        setError("Failed to fetch applications. Please try again.");
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, []);
 
   // Auto-dismiss toast after 3 seconds
   useEffect(() => {
     if (toast.visible) {
-      const timer = setTimeout(() => setToast({ message: "", visible: false }), 3000);
+      const timer = setTimeout(() => setToast({ message: { text: "", isError: false }, visible: false }), 3000);
       return () => clearTimeout(timer);
     }
   }, [toast.visible]);
@@ -118,19 +298,6 @@ export default function AdminApplications() {
     setSemester(newSemester);
   };
 
-  const openAddModal = () => {
-    setAddForm({
-      studentId: "",
-      partnerId: "",
-      applicationDate: "",
-      hasResume: false,
-      hasLetter: false,
-      errors: {},
-      processing: false,
-    });
-    setAddModalVisible(true);
-  };
-
   const openReviewModal = (application: Application) => {
     setSelectedApplicationId(application.id);
     setReviewForm({
@@ -138,7 +305,7 @@ export default function AdminApplications() {
       partnerId: application.partnerId || "",
       startDate: application.startDate || "",
       endDate: application.endDate || "",
-      requiredHours: application.requiredHours?.toString() || "",
+      requiredHours: application.requiredHours?.toString() || "600",
       remarks: application.remarks || "",
       errors: {},
       processing: false,
@@ -146,54 +313,23 @@ export default function AdminApplications() {
     setReviewModalVisible(true);
   };
 
-  const closeAddModal = () => {
-    setAddModalVisible(false);
-    setAddForm({
-      studentId: "",
-      partnerId: "",
-      applicationDate: "",
-      hasResume: false,
-      hasLetter: false,
-      errors: {},
-      processing: false,
-    });
-  };
-
   const closeReviewModal = () => {
     setReviewModalVisible(false);
+    setSelectedApplicationId(null);
     setReviewForm({
       status: "",
       partnerId: "",
       startDate: "",
       endDate: "",
-      requiredHours: "",
+      requiredHours: "600",
       remarks: "",
       errors: {},
       processing: false,
     });
-    setSelectedApplicationId(null);
-  };
-
-  const validateAddForm = (): boolean => {
-    const errors: FormErrors = {};
-    let isValid = true;
-
-    if (!addForm.studentId) {
-      errors.studentId = "Student is required";
-      isValid = false;
-    }
-
-    if (!addForm.applicationDate) {
-      errors.applicationDate = "Application Date is required";
-      isValid = false;
-    }
-
-    setAddForm((prev) => ({ ...prev, errors }));
-    return isValid;
   };
 
   const validateReviewForm = (): boolean => {
-    const errors: ReviewFormErrors = {};
+    const errors: FormErrors = {};
     let isValid = true;
 
     if (!reviewForm.status) {
@@ -216,83 +352,68 @@ export default function AdminApplications() {
     return isValid;
   };
 
-  const submitAdd = () => {
-    if (!validateAddForm()) {
-      setToast({ message: "Please fix the errors in the form.", visible: true });
+  const submitReview = async () => {
+    if (!validateReviewForm()) {
+      setToast({ message: { text: "Please fix the errors in the form.", isError: true }, visible: true });
       return;
     }
 
-    setAddForm((prev) => ({ ...prev, processing: true }));
-
-    setTimeout(() => {
-      const selectedStudent = students.find((s) => s.studentId === addForm.studentId);
-      if (!selectedStudent) {
-        setToast({ message: "Error: Invalid student selected.", visible: true });
-        setAddForm((prev) => ({ ...prev, processing: false }));
-        return;
-      }
-
-      const newApplication: Application = {
-        id: Date.now().toString(),
-        studentName: selectedStudent.name,
-        studentId: selectedStudent.studentId,
-        program: selectedStudent.program,
-        applicationDate: addForm.applicationDate,
-        hasResume: addForm.hasResume,
-        hasLetter: addForm.hasLetter,
-        status: "Pending",
-        partnerId: addForm.partnerId || undefined,
-      };
-      setApplications((prev) => [...prev, newApplication]);
-      setToast({ message: `Application for ${selectedStudent.name} added successfully!`, visible: true });
-      setAddForm((prev) => ({ ...prev, processing: false }));
-      closeAddModal();
-    }, 1000);
-  };
-
-  const submitReview = () => {
-    if (!validateReviewForm()) {
-      setToast({ message: "Please fix the errors in the form.", visible: true });
+    if (!selectedApplicationId) {
+      setToast({ message: { text: "No application selected.", isError: true }, visible: true });
       return;
     }
 
     setReviewForm((prev) => ({ ...prev, processing: true }));
 
-    setTimeout(() => {
+    try {
+      const response = await api.put(`/admin/applications/${selectedApplicationId}`, {
+        status: reviewForm.status,
+        partnerId: reviewForm.partnerId || null,
+        startDate: reviewForm.startDate || null,
+        endDate: reviewForm.endDate || null,
+        requiredHours: reviewForm.requiredHours ? Number(reviewForm.requiredHours) : null,
+        remarks: reviewForm.remarks || null,
+      });
+      const updatedApplication = response.data.application;
       setApplications((prev) =>
-        prev.map((app) =>
-          app.id === selectedApplicationId
-            ? {
-                ...app,
-                status: reviewForm.status as "Pending" | "Approved" | "Rejected",
-                partnerId: reviewForm.partnerId || undefined,
-                startDate: reviewForm.startDate || undefined,
-                endDate: reviewForm.endDate || undefined,
-                requiredHours: reviewForm.requiredHours ? Number(reviewForm.requiredHours) : undefined,
-                remarks: reviewForm.remarks || undefined,
-              }
-            : app
-        )
+        prev.map((app) => (app.id === selectedApplicationId ? updatedApplication : app))
       );
-      const selectedApp = applications.find((app) => app.id === selectedApplicationId);
-      setToast({ message: `Application for ${selectedApp?.studentName} reviewed successfully!`, visible: true });
-      setReviewForm((prev) => ({ ...prev, processing: false }));
+      setToast({ message: { text: "Application status updated successfully!", isError: false }, visible: true });
       closeReviewModal();
-    }, 1000);
+    } catch (err: any) {
+      if (err.response?.status === 422) {
+        setReviewForm((prev) => ({ ...prev, errors: err.response.data.errors }));
+        setToast({ message: { text: "Please fix the errors in the form.", isError: true }, visible: true });
+      } else {
+        setToast({ message: { text: err.response?.data?.message || "Failed to review application.", isError: true }, visible: true });
+      }
+      console.error(err);
+    } finally {
+      setReviewForm((prev) => ({ ...prev, processing: false }));
+    }
   };
 
-  const handleDelete = (id: string, studentName: string) => {
+  const deleteApplication = (application: Application) => {
     Alert.alert(
-      "Confirm Delete",
-      `Are you sure you want to delete the application for ${studentName}?`,
+      "Are you sure?",
+      "You won't be able to revert this!",
       [
         { text: "Cancel", style: "cancel" },
         {
           text: "Delete",
           style: "destructive",
-          onPress: () => {
-            setApplications((prev) => prev.filter((app) => app.id !== id));
-            setToast({ message: `Application for ${studentName} deleted successfully!`, visible: true });
+          onPress: async () => {
+            try {
+              await api.delete(`/admin/applications/${application.id}`);
+              setApplications((prev) => prev.filter((app) => app.id !== application.id));
+              setToast({ message: { text: "Application deleted successfully!", isError: false }, visible: true });
+            } catch (err: any) {
+              setToast({
+                message: { text: err.response?.data?.message || "Failed to delete application.", isError: true },
+                visible: true,
+              });
+              console.error(err);
+            }
           },
         },
       ],
@@ -300,7 +421,18 @@ export default function AdminApplications() {
     );
   };
 
-  // Filter applications based on search query
+  const handleApplicationAdded = () => {
+    setAddModalVisible(false);
+    setToast({ message: { text: "Application added successfully!", isError: false }, visible: true });
+    // Refresh applications
+    api.get("/admin/applications")
+      .then((response) => {
+        setApplications(response.data.applications);
+      })
+      .catch((err) => console.error(err));
+  };
+
+  // Filter applications
   const filteredApplications = applications.filter(
     (app) =>
       app.studentName.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -318,32 +450,73 @@ export default function AdminApplications() {
   const columnWidths = {
     studentName: 150,
     studentId: 120,
-    program: 150,
-    applicationDate: 120,
-    documents: 150,
+    program: 120,
+    applicationDate: 100,
+    documents: 120,
     status: 100,
     actions: 120,
   };
 
-  const totalApplications = applications.length;
-  const pendingApplications = applications.filter((app) => app.status === "Pending").length;
-  const approvedApplications = applications.filter((app) => app.status === "Approved").length;
-  const rejectedApplications = applications.filter((app) => app.status === "Rejected").length;
-
-  // Mock document download (replace with real URLs in production)
-  const downloadDocument = (applicationId: string, type: "resume" | "letter") => {
-    const url = type === "resume" ? `/api/application/${applicationId}/resume` : `/api/application/${applicationId}/letter`;
-    Linking.openURL(url).catch(() => setToast({ message: `Error opening ${type}.`, visible: true }));
+  // Status badge style
+  const getStatusStyle = (status: string) => {
+    return {
+      ...styles.statusBadge,
+      ...(status === "Approved" ? styles.approvedBadge : status === "Rejected" ? styles.rejectedBadge : styles.pendingBadge),
+    };
   };
+
+  // View document in PDF viewer
+  const viewDocument = async (applicationId: string, type: "resume" | "letter") => {
+    try {
+      const application = applications.find(app => app.id === applicationId);
+      if (!application) return;
+
+      const pdfUrl = `${api.defaults.baseURL}/admin/applications/${applicationId}/${type.toLowerCase()}`;
+      const documentTitle = `${application.studentName} - ${application.studentId}`;
+      
+      setPdfViewerData({
+        url: pdfUrl,
+        title: documentTitle,
+        documentType: type.charAt(0).toUpperCase() + type.slice(1),
+        applicationId: applicationId
+      });
+      setPdfModalVisible(true);
+    } catch (err) {
+      setToast({ message: { text: `Error loading ${type}.`, isError: true }, visible: true });
+      console.error(err);
+    }
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <ActivityIndicator size="large" color="#4CAF50" />
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.errorText}>{error}</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} activeRoute="admin/applications" />
       <Header onToggleSidebar={toggleSidebar} title={semester} onChangeSemester={handleChangeSemester} />
       <ScrollView style={styles.content}>
-        <Text style={styles.headerTitle}>OJT Applications</Text>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Student OJT Applications</Text>
+          <TouchableOpacity style={styles.addButton} onPress={() => setAddModalVisible(true)}>
+            <Ionicons name="add" size={20} color="#fff" />
+            <Text style={styles.addButtonText}>Add Application</Text>
+          </TouchableOpacity>
+        </View>
 
-        {/* Search and Add Section */}
+        {/* Search Section */}
         <View style={styles.searchContainer}>
           <View style={styles.searchInputContainer}>
             <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
@@ -359,13 +532,9 @@ export default function AdminApplications() {
               </TouchableOpacity>
             )}
           </View>
-          <TouchableOpacity style={styles.addButton} onPress={openAddModal}>
-            <Ionicons name="add" size={20} color="#fff" />
-            <Text style={styles.addButtonText}>Add Application</Text>
-          </TouchableOpacity>
         </View>
 
-        {/* Application List with Horizontal Scroll */}
+        {/* Applications Table */}
         <View style={styles.tableContainer}>
           <ScrollView horizontal showsHorizontalScrollIndicator={true}>
             <View>
@@ -406,36 +575,25 @@ export default function AdminApplications() {
                           {application.hasResume && (
                             <TouchableOpacity
                               style={styles.documentLink}
-                              onPress={() => downloadDocument(application.id, "resume")}
+                              onPress={() => viewDocument(application.id, "resume")}
                             >
                               <Ionicons name="document-text" size={16} color="#2196F3" />
-                              <Text style={styles.documentText}>Resume</Text>
+                              <Text style={styles.documentText}>View Resume</Text>
                             </TouchableOpacity>
                           )}
                           {application.hasLetter && (
                             <TouchableOpacity
                               style={styles.documentLink}
-                              onPress={() => downloadDocument(application.id, "letter")}
+                              onPress={() => viewDocument(application.id, "letter")}
                             >
                               <Ionicons name="document" size={16} color="#2196F3" />
-                              <Text style={styles.documentText}>Letter</Text>
+                              <Text style={styles.documentText}>View Letter</Text>
                             </TouchableOpacity>
                           )}
                         </View>
                       </View>
                       <View style={[styles.tableCell, { width: columnWidths.status }]}>
-                        <Text
-                          style={[
-                            styles.statusBadge,
-                            application.status === "Approved"
-                              ? styles.approvedBadge
-                              : application.status === "Rejected"
-                              ? styles.rejectedBadge
-                              : styles.pendingBadge,
-                          ]}
-                        >
-                          {application.status}
-                        </Text>
+                        <Text style={getStatusStyle(application.status)}>{application.status}</Text>
                       </View>
                       <View style={[styles.tableCell, { width: columnWidths.actions }]}>
                         <View style={styles.actionsContainer}>
@@ -447,7 +605,7 @@ export default function AdminApplications() {
                           </TouchableOpacity>
                           <TouchableOpacity
                             style={styles.actionButton}
-                            onPress={() => handleDelete(application.id, application.studentName)}
+                            onPress={() => deleteApplication(application)}
                           >
                             <Ionicons name="trash-outline" size={20} color="#F44336" />
                           </TouchableOpacity>
@@ -460,170 +618,26 @@ export default function AdminApplications() {
             </View>
           </ScrollView>
         </View>
-
-        {/* Statistics Cards */}
-        <View style={styles.statsContainer}>
-          <View style={styles.statCard}>
-            <View style={styles.statIconContainer}>
-              <Ionicons name="document-text" size={24} color="#4CAF50" />
-            </View>
-            <Text style={styles.statNumber}>{totalApplications}</Text>
-            <Text style={styles.statLabel}>Total Applications</Text>
-          </View>
-          <View style={styles.statCard}>
-            <View style={styles.statIconContainer}>
-              <Ionicons name="hourglass" size={24} color="#4CAF50" />
-            </View>
-            <Text style={styles.statNumber}>{pendingApplications}</Text>
-            <Text style={styles.statLabel}>Pending</Text>
-          </View>
-          <View style={styles.statCard}>
-            <View style={styles.statIconContainer}>
-              <Ionicons name="checkmark" size={24} color="#4CAF50" />
-            </View>
-            <Text style={styles.statNumber}>{approvedApplications}</Text>
-            <Text style={styles.statLabel}>Approved</Text>
-          </View>
-          <View style={styles.statCard}>
-            <View style={styles.statIconContainer}>
-              <Ionicons name="close" size={24} color="#4CAF50" />
-            </View>
-            <Text style={styles.statNumber}>{rejectedApplications}</Text>
-            <Text style={styles.statLabel}>Rejected</Text>
-          </View>
-        </View>
       </ScrollView>
 
       {/* Add Application Modal */}
-      <Modal visible={addModalVisible} transparent={true} animationType="slide" onRequestClose={closeAddModal}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Add New Application</Text>
-              <TouchableOpacity onPress={closeAddModal}>
-                <Ionicons name="close" size={24} color="#333" />
-              </TouchableOpacity>
-            </View>
+      <AddApplicationModal
+        visible={addModalVisible}
+        onClose={() => setAddModalVisible(false)}
+        students={students}
+        partners={partners}
+        onApplicationAdded={handleApplicationAdded}
+      />
 
-            <ScrollView style={styles.modalBody}>
-              <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>Student</Text>
-                <TouchableOpacity
-                  style={[styles.formSelect, addForm.errors.studentId && styles.inputError]}
-                  onPress={() => {
-                    Alert.alert(
-                      "Select Student",
-                      "Choose a student",
-                      [
-                        ...students.map((student) => ({
-                          text: `${student.name} (${student.studentId})`,
-                          onPress: () =>
-                            setAddForm((prev) => ({ ...prev, studentId: student.studentId })),
-                        })),
-                        { text: "Cancel", style: "cancel" },
-                      ],
-                      { cancelable: true }
-                    );
-                  }}
-                >
-                  <Text style={addForm.studentId ? styles.selectText : styles.selectPlaceholder}>
-                    {addForm.studentId
-                      ? students.find((s) => s.studentId === addForm.studentId)?.name || "Select Student"
-                      : "Select Student"}
-                  </Text>
-                  <Ionicons name="chevron-down" size={20} color="#666" />
-                </TouchableOpacity>
-                <InputError message={addForm.errors.studentId} />
-              </View>
-
-              <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>Partner (Optional)</Text>
-                <TouchableOpacity
-                  style={styles.formSelect}
-                  onPress={() => {
-                    Alert.alert(
-                      "Select Partner",
-                      "Choose a partner",
-                      [
-                        { text: "None", onPress: () => setAddForm((prev) => ({ ...prev, partnerId: "" })) },
-                        ...partners.map((partner) => ({
-                          text: partner.partnerName,
-                          onPress: () => setAddForm((prev) => ({ ...prev, partnerId: partner.id })),
-                        })),
-                        { text: "Cancel", style: "cancel" },
-                      ],
-                      { cancelable: true }
-                    );
-                  }}
-                >
-                  <Text style={addForm.partnerId ? styles.selectText : styles.selectPlaceholder}>
-                    {addForm.partnerId
-                      ? partners.find((p) => p.id === addForm.partnerId)?.partnerName || "Select Partner"
-                      : "Select Partner"}
-                  </Text>
-                  <Ionicons name="chevron-down" size={20} color="#666" />
-                </TouchableOpacity>
-              </View>
-
-              <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>Application Date</Text>
-                <TextInput
-                  style={[styles.formInput, addForm.errors.applicationDate && styles.inputError]}
-                  value={addForm.applicationDate}
-                  onChangeText={(text) => setAddForm((prev) => ({ ...prev, applicationDate: text }))}
-                  placeholder="YYYY-MM-DD"
-                />
-                <InputError message={addForm.errors.applicationDate} />
-              </View>
-
-              <View style={styles.formGroup}>
-                <Text style={styles.formLabel}>Documents</Text>
-                <View style={styles.checkboxContainer}>
-                  <TouchableOpacity
-                    style={styles.checkbox}
-                    onPress={() => setAddForm((prev) => ({ ...prev, hasResume: !prev.hasResume }))}
-                  >
-                    <Ionicons
-                      name={addForm.hasResume ? "checkbox" : "square-outline"}
-                      size={24}
-                      color="#4CAF50"
-                    />
-                    <Text style={styles.checkboxText}>Resume</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.checkbox}
-                    onPress={() => setAddForm((prev) => ({ ...prev, hasLetter: !prev.hasLetter }))}
-                  >
-                    <Ionicons
-                      name={addForm.hasLetter ? "checkbox" : "square-outline"}
-                      size={24}
-                      color="#4CAF50"
-                    />
-                    <Text style={styles.checkboxText}>Letter</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </ScrollView>
-
-            <View style={styles.modalFooter}>
-              <TouchableOpacity style={styles.cancelButton} onPress={closeAddModal}>
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.submitButton, addForm.processing && styles.disabledButton]}
-                onPress={submitAdd}
-                disabled={addForm.processing}
-              >
-                {addForm.processing ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Text style={styles.submitButtonText}>Add Application</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      {/* PDF Viewer Modal */}
+      <PDFViewerModal
+        visible={pdfModalVisible}
+        onClose={() => setPdfModalVisible(false)}
+        pdfUrl={pdfViewerData.url}
+        documentTitle={pdfViewerData.title}
+        applicationId={pdfViewerData.applicationId}
+        documentType={pdfViewerData.documentType}
+      />
 
       {/* Review Application Modal */}
       <Modal visible={reviewModalVisible} transparent={true} animationType="slide" onRequestClose={closeReviewModal}>
@@ -773,7 +787,7 @@ export default function AdminApplications() {
       <Toast
         message={toast.message}
         visible={toast.visible}
-        onClose={() => setToast({ message: "", visible: false })}
+        onClose={() => setToast({ message: { text: "", isError: false }, visible: false })}
       />
 
       <Navbar activeRoute="admin/applications" />
@@ -1100,5 +1114,81 @@ const styles = StyleSheet.create({
     color: "white",
     fontSize: 16,
     fontWeight: "500",
+  },
+    pdfModalContainer: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  pdfModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderColor: '#ddd',
+    backgroundColor: '#f9f9f9',
+  },
+  pdfCloseButton: {
+    padding: 8,
+  },
+  pdfModalTitle: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginLeft: 10,
+  },
+  pdfHeaderActions: {
+    flexDirection: 'row',
+  },
+  pdfActionButton: {
+    marginLeft: 12,
+    padding: 8,
+  },
+  pdfViewer: {
+    flex: 1,
+    backgroundColor: '#f0f0f0',
+  },
+  webView: {
+    flex: 1,
+  },
+  pdfLoadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pdfLoadingText: {
+    marginTop: 8,
+    fontSize: 14,
+    color: '#666',
+  },
+  pdfModalFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderTopWidth: 1,
+    borderColor: '#ddd',
+    backgroundColor: '#fff',
+  },
+  pdfFooterButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 6,
+  },
+  downloadButton: {
+    backgroundColor: '#4CAF50',
+  },
+  printButton: {
+    backgroundColor: '#2196F3',
+  },
+  pdfFooterButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '500',
+    marginLeft: 8,
   },
 });
